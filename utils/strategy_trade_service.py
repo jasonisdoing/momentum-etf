@@ -775,6 +775,7 @@ def _build_strategy_view(
     round_size = int(strategy_settings["round_size"])
     rate = krw_rate(country)
     max_rounds = int(strategy_settings["rounds"])
+    auto_order = bool(strategy_settings["auto_order"])
     exchange = strategy_settings["exchange"]
     if country == "us" and not exchange:
         raise ValueError("이 종목의 거래소가 저장돼 있지 않습니다 — 전략을 다시 저장하세요.")
@@ -949,6 +950,7 @@ def _build_strategy_view(
             "round_size": round_size,
             "rounds": max_rounds,
             "index_name": name,
+            "auto_order": auto_order,
         },
         "index": index_status,
         "cash": cash,
@@ -1054,6 +1056,7 @@ def _failed_view(
             "round_size": entry["round_size"],
             "rounds": entry["rounds"],
             "index_name": label,
+            "auto_order": entry["auto_order"],
         },
         "error": str(error),
         "rounds": [],
@@ -1376,6 +1379,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
                 "trigger_pct": entry["trigger_pct"],
                 "round_size": entry["round_size"],
                 "rounds": entry["rounds"],
+                "auto_order": entry["auto_order"],
                 "price": quotes.get(entry["ticker"], {}).get("price"),
                 "change_pct": quotes.get(entry["ticker"], {}).get("change_pct"),
                 "drawdown_pct": quotes.get(entry["ticker"], {}).get("drawdown_pct"),

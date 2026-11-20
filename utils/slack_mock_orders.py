@@ -102,6 +102,25 @@ _SESSION_CLOSED_NOTE = "⌛ 장 마감으로 주문 불가"
 _ALREADY_DONE_NOTE = "✅ 이미 처리된 회차라 주문하지 않음"
 
 
+#: 자동 주문 표시 — 자동 신호 머리말·주문 메시지·결과 답글 앞에 붙여 수동과 구분한다.
+AUTO_ORDER_TAG = "🤖[자동]"
+
+
+def is_auto_trigger(strategy_view: dict[str, Any], trigger: dict[str, Any]) -> bool:
+    """자동 주문 대상 신호인지 — 「자동」을 켠 전략의 자동 신호만. 화면에서 보낸 수동 신호는 버튼으로 둔다."""
+    return bool(strategy_view["config"]["auto_order"]) and trigger.get("origin") != "manual"
+
+
+def _slack_of(target: dict[str, Any]) -> dict[str, Any]:
+    """주문 기록에 남길 슬랙 위치 — 자동 주문 여부도 함께 남겨 끝난 뒤 결과 답글에도 표시한다."""
+    return {**{key: target[key] for key in SLACK_TARGET_KEYS}, "auto": target["request"].get("auto") is True}
+
+
+def _auto_tag(request: dict[str, Any]) -> str:
+    # 자동 주문 표시가 생기기 전 버튼·주문 기록에는 키가 없다 — 그것들은 모두 수동 주문이다.
+    return f"{AUTO_ORDER_TAG} " if request.get("auto") is True else ""
+
+
 def _env_word(env: str) -> str:
     """메시지에 쓰는 계좌 구분."""
     return "모의" if env == ACCOUNT_ENV_MOCK else "운영"
@@ -152,6 +171,8 @@ def _section(request: dict[str, Any]) -> dict[str, Any]:
         detail = "확인창에서 주문 지정가를 확인합니다"
     elif _is_swap(request):
         detail = "매도 1호가에 매도, 매수 1호가에 재매수 주문을 함께 겁니다"
+    elif request.get("auto") is True:
+        detail = f"신호와 함께 자동으로 그 순간의 {_QUOTE_LABELS[request['side']]}로 냅니다"
     else:
         detail = f"버튼을 확정하는 순간의 {_QUOTE_LABELS[request['side']]}로 냅니다"
     return {
@@ -159,7 +180,7 @@ def _section(request: dict[str, Any]) -> dict[str, Any]:
         "text": {
             "type": "mrkdwn",
             "text": (
-                f"*[{_env_word(request['env'])}] {_action_word(request)} 주문*\n{_order_text(request)}\n"
+                f"*{_auto_tag(request)}[{_env_word(request['env'])}] {_action_word(request)} 주문*\n{_order_text(request)}\n"
                 f"{detail} ({request['ticker']})"
             ),
         },
@@ -249,7 +270,7 @@ def _update_message(target: dict[str, Any], blocks: list[dict[str, Any]]) -> Non
     _slack_client().chat_update(
         channel=target["channel"],
         ts=target["message_ts"],
-        text=f"[{_env_word(target['request']['env'])}] {_order_text(target['request'])}",
+        text=f"{_auto_tag(target['request'])}[{_env_word(target['request']['env'])}] {_order_text(target['request'])}",
         blocks=blocks,
     )
 
@@ -263,6 +284,7 @@ def send_order_message(
     thread_ts: str | None,
     *,
     rebuy: bool,
+    auto: bool,
     arbitrary_id: str | None = None,
 ) -> dict[str, Any]:
     """주문 메시지를 슬랙으로 보낸다(thread_ts 가 있으면 그 스레드에) — 주문은 슬랙에서 버튼과 모달 확인을 거쳐야 나간다.
@@ -276,7 +298,9 @@ def send_order_message(
         order = resolve_swap(account_id, pool, strategy_id, round_no, fresh=False)
     else:
         order = resolve_order(account_id, pool, strategy_id, side, round_no, fresh=False, arbitrary_id=arbitrary_id)
-    return _send_order_request(account_id, pool, strategy_id, side, round_no, thread_ts, rebuy, arbitrary_id, order)
+    return _send_order_request(
+        account_id, pool, strategy_id, side, round_no, thread_ts, rebuy, arbitrary_id, order, auto=auto
+    )
 
 
 def _send_order_request(
@@ -289,8 +313,10 @@ def _send_order_request(
     rebuy: bool,
     arbitrary_id: str | None,
     order: dict[str, Any],
+    *,
+    auto: bool,
 ) -> dict[str, Any]:
-    """확정된 표시 내용으로 기존 주문 버튼을 만든다. 실제 호가는 Slack 확인 시 조회한다."""
+    """확정된 표시 내용으로 기존 주문 버튼을 만든다. 실제 호가는 Slack 확인(자동이면 바로 이어지는 주문) 시 조회한다."""
     env = account_env(account_id)
     request = {
         "env": env,
@@ -306,13 +332,16 @@ def _send_order_request(
         ),
         "rebuy": rebuy,
         "arbitrary_id": arbitrary_id,
+        "auto": auto,
     }
     return send_order_request(request, thread_ts)
 
 
 def send_order_request(request: dict[str, Any], thread_ts: str | None) -> dict[str, Any]:
     """전략에서 구성한 주문 요청을 공통 Slack 버튼으로 보낸다."""
-    ts = send_thread_message(f"[{_env_word(request['env'])}] {_order_text(request)}", _open_blocks(request), thread_ts)
+    ts = send_thread_message(
+        f"{_auto_tag(request)}[{_env_word(request['env'])}] {_order_text(request)}", _open_blocks(request), thread_ts
+    )
     if not ts:
         raise BrokerApiError("슬랙으로 주문 메시지를 보내지 못했습니다.")
     return {"ts": ts, "request": request}
@@ -648,9 +677,9 @@ def _final_text(order: dict[str, Any]) -> str:
 
 def _finish(target: dict[str, Any], order: dict[str, Any]) -> None:
     """끝난 주문의 결과를 스레드로 알리고 메시지에서 버튼을 걷어낸다 — 하나도 체결 안 된 취소만 다시 주문하기 버튼을 남긴다."""
-    text = _final_text(order)
-    send_thread_message(text, thread_ts=target["thread_ts"])
     request = target["request"]
+    text = _auto_tag(request) + _final_text(order)
+    send_thread_message(text, thread_ts=target["thread_ts"])
     if order["pair_id"] is not None:
         _update_message(target, _pair_blocks(request, order["pair_id"], text))
         return
@@ -676,7 +705,7 @@ def _expire(target: dict[str, Any], exc: RoundNotOrderableError) -> None:
         _update_message(target, _note_blocks(request, _ALREADY_DONE_NOTE))
         _settle_message(target, MESSAGE_DONE)
         return
-    side = f"{_env_word(request['env'])} {_action_word(request)}"
+    side = f"{_auto_tag(request)}{_env_word(request['env'])} {_action_word(request)}"
     send_thread_message(f"❌ {side} 주문 불가: {exc}", thread_ts=target["thread_ts"])
     _update_message(target, _note_blocks(request, "⌛ 보유 상태가 바뀌어 주문 불가"))
     _settle_message(target, MESSAGE_FAILED)
@@ -726,7 +755,7 @@ def _run_post_order_updates(target: dict[str, Any], thread_text: str, blocks: li
 def _place_swap(target: dict[str, Any], *, reraise: bool = False) -> dict[str, Any] | None:
     """매도 후 재매수 한 짝을 낸다 — 결과를 스레드로 알리고 메시지에 양쪽 취소 버튼을 단다."""
     request = target["request"]
-    word = f"{_env_word(request['env'])} 매도 후 재매수"
+    word = f"{_auto_tag(request)}{_env_word(request['env'])} 매도 후 재매수"
     _update_message(target, _note_blocks(request, "⏳ 주문 처리 중…"))
     try:
         result = place_swap(
@@ -734,7 +763,7 @@ def _place_swap(target: dict[str, Any], *, reraise: bool = False) -> dict[str, A
             request["pool"],
             request["strategy_id"],
             request["round"],
-            {key: target[key] for key in SLACK_TARGET_KEYS},
+            _slack_of(target),
         )
     except RoundNotOrderableError as exc:
         _expire(target, exc)
@@ -763,11 +792,11 @@ def _place(target: dict[str, Any], *, reraise: bool = False) -> dict[str, Any] |
     request = target["request"]
     if _is_swap(request):
         return _place_swap(target, reraise=reraise)
-    side = f"{_env_word(request['env'])} {_action_word(request)}"
+    side = f"{_auto_tag(request)}{_env_word(request['env'])} {_action_word(request)}"
     # 처리하는 동안 같은 메시지로 또 주문하지 못하게 버튼부터 걷어낸다.
     _update_message(target, _note_blocks(request, "⏳ 주문 처리 중…"))
     try:
-        slack = {key: target[key] for key in SLACK_TARGET_KEYS}
+        slack = _slack_of(target)
         if request.get("mix_action_key") is not None:
             from utils.strategy_mix_orders import place_mix_order
 
@@ -862,26 +891,29 @@ def _cancel(target: dict[str, Any], *, reraise: bool = False) -> dict[str, Any] 
     return cancelled
 
 
+def _submit_order(target: dict[str, Any]) -> None:
+    """확인된 주문 한 건을 신호 선점 뒤 낸다 — 버튼 확인과 자동 주문이 같이 쓴다. 호출하는 쪽이 `signal_lock` 을 잡고 있어야 한다."""
+    from utils.strategy_trade_threads import finish_order_reservation, reserve_signal_for_order
+
+    if target["request"].get("mix_action_key") is not None:
+        from utils.strategy_mix_orders import mix_submission_open
+
+        if not mix_submission_open(target["request"], target["thread_ts"], target["confirmation_id"]):
+            return
+    if not reserve_signal_for_order(target["thread_ts"], target["message_ts"]):
+        return
+    try:
+        _place(target)
+    finally:
+        finish_order_reservation(target["thread_ts"])
+
+
 def run_submission(target: dict[str, Any]) -> None:
     """확인된 주문·정정·취소를 처리한다 — 응답 뒤 백그라운드에서 돈다."""
     try:
         with signal_lock():
             if target["kind"] == "order":
-                from utils.strategy_trade_threads import reserve_signal_for_order
-
-                if target["request"].get("mix_action_key") is not None:
-                    from utils.strategy_mix_orders import mix_submission_open
-
-                    if not mix_submission_open(target["request"], target["thread_ts"], target["confirmation_id"]):
-                        return
-                if not reserve_signal_for_order(target["thread_ts"], target["message_ts"]):
-                    return
-                try:
-                    _place(target)
-                finally:
-                    from utils.strategy_trade_threads import finish_order_reservation
-
-                    finish_order_reservation(target["thread_ts"])
+                _submit_order(target)
             elif target["kind"] == "modify":
                 _modify(target)
             else:
@@ -906,6 +938,8 @@ def _request_of(record: dict[str, Any]) -> dict[str, Any]:
         "quantity": record["quantity"],
         "rebuy": swap,
         "arbitrary_id": record.get("arbitrary_id"),
+        # 자동 주문 표시가 생기기 전 주문 기록에는 키가 없다 — 그것들은 모두 수동 주문이다.
+        "auto": record["slack"].get("auto") is True,
         **({"mix_action_key": record["mix_action_key"]} if "mix_action_key" in record else {}),
     }
 
@@ -1039,7 +1073,9 @@ def close_session_threads(strategies: list[dict[str, Any]]) -> int:
 def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dict[str, Any]], signal_ts: str) -> int:
     """신호가 난 회차마다 주문 메시지(버튼)를 신호 메시지의 스레드로 보내고 그 스레드를 추적 대상으로 기록한다 — 보낸 건수.
 
-    이미 주문이 진행 중인 회차는 건너뛴다. 주문은 슬랙의 버튼과 모달 확인을 거쳐야 나간다.
+    이미 주문이 진행 중인 회차는 건너뛴다. 주문은 슬랙의 버튼과 모달 확인을 거쳐야 나간다 — 단 「자동」을 켠
+    전략의 자동 신호(`is_auto_trigger`)는 메시지를 보낸 뒤 버튼 확인과 같은 경로(`_submit_order`)로 바로 주문한다.
+    호출하는 쪽이 `signal_lock` 을 잡고 있어야 한다.
     """
     account_id = strategy_view["account_id"]
     pending = [
@@ -1067,6 +1103,7 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
                         "ticker": trigger["ticker"],
                         "quantity": trigger["quantity"],
                     },
+                    auto=False,
                 )
                 messages.append(message)
                 continue
@@ -1078,6 +1115,7 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
                 trigger["round"],
                 signal_ts,
                 rebuy=trigger["rebuy"],
+                auto=is_auto_trigger(strategy_view, trigger),
                 arbitrary_id=trigger.get("arbitrary_id"),
             )
             messages.append(message)
@@ -1085,6 +1123,23 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
         # 중간에 실패해도 이미 보낸 메시지는 스레드로 추적한다.
         if messages:
             register_signal_thread(get_slack_channel(), signal_ts, messages)
+    channel = get_slack_channel()
+    for message in messages:
+        if message["request"]["auto"]:
+            # 사람이 버튼을 누르고 확인한 것과 같은 대상 — 주문 실패는 `_place` 가 스레드로 알리고 버튼을 되살린다.
+            try:
+                _submit_order(
+                    {
+                        "request": message["request"],
+                        "channel": channel,
+                        "message_ts": message["ts"],
+                        "thread_ts": signal_ts,
+                        "kind": "order",
+                    }
+                )
+            except Exception as exc:  # 한 건이 멈춰도 나머지 자동 주문은 진행한다.
+                logger.exception("자동 주문 처리 실패")
+                send_thread_message(f"⚠️ {AUTO_ORDER_TAG} 처리 중 오류로 멈춥니다: {exc}", thread_ts=signal_ts)
     return len(messages)
 
 

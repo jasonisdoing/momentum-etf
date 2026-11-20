@@ -338,7 +338,12 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     # 실제 신호와 테스트 발송을 상단에서 바로 구분한다.
     # 실제 신호는 주문이 필요하므로 <!channel> 로 채널 전체에 알린다(테스트는 제외).
     if triggers:
-        lines = [f"<!channel> *⚡ 전략 사고팔기 — 실제 신호* ({now}) · {strategy_view['account_name']}"]
+        from utils.slack_mock_orders import AUTO_ORDER_TAG, is_auto_trigger
+
+        # 자동 주문 전략의 자동 신호는 머리말로 수동 신호와 구분한다.
+        auto = all(is_auto_trigger(strategy_view, trigger) for trigger in triggers)
+        head = f"{AUTO_ORDER_TAG}전략 사고팔기 — 실제 신호" if auto else "⚡ 전략 사고팔기 — 실제 신호"
+        lines = [f"<!channel> *{head}* ({now}) · {strategy_view['account_name']}"]
     else:
         lines = [
             f"*🧪 전략 사고팔기 테스트* ({now}) · {strategy_view['account_name']}",

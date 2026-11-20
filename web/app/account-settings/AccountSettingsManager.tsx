@@ -11,6 +11,7 @@ import { LastSavedCell } from "../components/LastSavedCell";
 import { ensureAsxPrefix } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
+import { GRID_CHECKBOX_CELL_STYLE, GridCheckbox } from "../components/GridCheckbox";
 import { ApiOrderModal } from "./ApiOrderModal";
 import { maskedBrokerAccount } from "./broker-label";
 
@@ -939,12 +940,7 @@ export function AccountSettingsManager() {
     },
   });
 
-  /** 체크박스 컬럼 — AG Grid 편집 사이클을 거치지 않고 **직접 그린다**.
-   *
-   *  `cellDataType: "boolean"` + `editable` 로 두면 클릭이 편집 시작과 값 토글을 겸하는데,
-   *  `stopEditingWhenCellsLoseFocus` 와 맞물려 켤 때 편집 중 상태가 남아 체크 표시가 보이지
-   *  않았다(값은 바뀌어 저장은 됐다). 초안 값을 그대로 그리고 onChange 로만 바꾸면
-   *  화면과 값이 항상 같다. */
+  /** 체크박스 컬럼 — 공용 `GridCheckbox` 로 직접 그린다. */
   const booleanCol = (
     field: "mix_enabled" | "trade_enabled" | "hidden" | "ma_alarm_enabled" | "stoploss_alarm_enabled" | "api_order_enabled",
     headerName: string,
@@ -956,19 +952,18 @@ export function AccountSettingsManager() {
     width,
     headerTooltip,
     editable: false,
-    cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+    cellStyle: GRID_CHECKBOX_CELL_STYLE,
     cellRenderer: (params: { data?: AccountGridRow }) => {
       const row = params.data;
       if (!row) return null;
       // 모의 계좌는 합성·알림 대상이 아니다 — 체크박스 대신 막힌 표시.
       if (row.env === ENV_MOCK) return <span style={mutedStyle}>—</span>;
       return (
-        <input
-          type="checkbox"
-          className="form-check-input"
-          style={{ margin: 0, cursor: "pointer" }}
+        <GridCheckbox
           checked={Boolean(row[field])}
-          onChange={(event) => updateDraft(row.account_id, { [field]: event.target.checked })}
+          disabled={false}
+          label={`${row.name} ${headerName}`}
+          onChange={(checked) => updateDraft(row.account_id, { [field]: checked })}
         />
       );
     },

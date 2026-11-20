@@ -29,6 +29,10 @@ class MemoryCollection:
 
     def matches(self, doc, query):
         for key, expected in query.items():
+            if key == "$nor":
+                if any(self.matches(doc, item) for item in expected):
+                    return False
+                continue
             value = doc
             for part in key.split("."):
                 value = value.get(part) if isinstance(value, dict) else None

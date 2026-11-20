@@ -36,6 +36,7 @@ import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { useStockMemoSave } from "../components/useStockMemoSave";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
+import { GRID_CHECKBOX_CELL_STYLE, GridCheckbox } from "../components/GridCheckbox";
 
 type StrategyConfig = {
   // 매매 간격(%) 하나로 진입·추가·매도를 모두 관리한다.
@@ -180,6 +181,8 @@ type StrategyConfigRow = {
   trigger_pct: number;
   round_size: number;
   rounds: number;
+  /** 자동 주문 — 켜면 자동 신호가 슬랙 발송과 함께 버튼 주문과 같은 경로로 바로 주문된다. */
+  auto_order: boolean;
   /** 현재가·일간(%) — 공통 시세 경로 값. 못 받으면 null. */
   price: number | null;
   change_pct: number | null;
@@ -584,6 +587,7 @@ type DraftRow = {
   pct: string;
   amount: string;
   rounds: string;
+  auto: boolean;
 };
 
 let draftKeySeq = 0;
@@ -601,13 +605,14 @@ function rowFromConfig(config: StrategyConfigRow): DraftRow {
     pct: String(config.trigger_pct),
     amount: String(config.round_size),
     rounds: String(config.rounds),
+    auto: config.auto_order,
   };
 }
 
 /** 변경 비교용 — 입력 중 문자열을 저장 값 모양으로 맞춘다. */
 function comparableDrafts(rows: DraftRow[]) {
   return rows.map((row) => [
-    row.strategy_id, row.ticker, Number(row.pct), Number(row.amount), Number(row.rounds),
+    row.strategy_id, row.ticker, Number(row.pct), Number(row.amount), Number(row.rounds), row.auto,
   ]);
 }
 
@@ -711,7 +716,7 @@ function displayWeights(values: number[], total: number): number[] {
 }
 
 function tradeListLabel(key: string, name: string): TradeListRow {
-  return { key, ticker: "", name, strategy_id: null, pct: "", amount: "", rounds: "", held: false, heldRounds: "", is_label: true };
+  return { key, ticker: "", name, strategy_id: null, pct: "", amount: "", rounds: "", auto: false, held: false, heldRounds: "", is_label: true };
 }
 
 const tradeSettingColumns = [
@@ -989,6 +994,27 @@ function AccountSettingsCard({
       }),
       pinned: "left",
     },
+    // 자동 주문 — 켠 전략만 자동 신호를 버튼 주문과 같은 경로로 바로 주문한다(저장 버튼으로 반영).
+    {
+      colId: "auto",
+      field: "auto",
+      headerName: "자동",
+      headerTooltip: "켜면 자동 신호를 슬랙 발송과 함께 바로 주문한다 — 저장 버튼을 눌러야 반영된다",
+      width: 56,
+      pinned: "left",
+      sortable: false,
+      editable: false,
+      cellStyle: GRID_CHECKBOX_CELL_STYLE,
+      cellRenderer: ({ data, node }: { data?: TradeListRow; node: { rowPinned?: unknown } }) =>
+        !data || node.rowPinned || data.is_label || data.is_group ? null : (
+          <GridCheckbox
+            checked={data.auto}
+            disabled={saving}
+            label={`${data.name} 자동 주문`}
+            onChange={(checked) => updateRow(data.key, { auto: checked })}
+          />
+        ),
+    } satisfies ColDef<TradeListRow>,
     ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => {
       const pctFormatter =
         column.field === "pct"
@@ -1057,7 +1083,7 @@ function AccountSettingsCard({
       valueGetter: (row) => (row?.is_label || row?.key === TOTAL_ROW_KEY || row?.key === TRADE_TOTAL_ROW_KEY ? null : row?.mdd_pct),
       isPartial: (row) => Boolean(row?.gap_partial),
     }),
-  ], [saving, onOpenSignal, view.recommended_gap_months, view.recommended_gap_rounds]);
+  ], [saving, onOpenSignal, updateRow, view.recommended_gap_months, view.recommended_gap_rounds]);
 
   const tradeRowClass = ({ data }: RowClassParams<TradeListRow>) => [
     data?.is_group || data?.key === TOTAL_ROW_KEY || data?.key === TRADE_TOTAL_ROW_KEY ? "assetsGroupRow" : "",
@@ -1106,7 +1132,7 @@ function AccountSettingsCard({
     const key = nextDraftKey();
     setDrafts((prev) => [
       ...prev,
-      { key, strategy_id: null, ticker: option.ticker, name: option.name, pct: "5", amount: String(view.default_round_size), rounds: "4" },
+      { key, strategy_id: null, ticker: option.ticker, name: option.name, pct: "5", amount: String(view.default_round_size), rounds: "4", auto: false },
     ]);
     setSelection({ accountId, ticker: option.ticker });
     setPickerOpen(false);
@@ -1153,6 +1179,7 @@ function AccountSettingsCard({
         trigger_pct: pct,
         round_size: amount,
         rounds,
+        auto_order: row.auto,
       });
     }
     setSaving(true);

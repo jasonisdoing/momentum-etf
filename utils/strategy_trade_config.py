@@ -54,7 +54,7 @@ FIRST_ENTRY_WINDOWS: dict[str, tuple[tuple[time, time], ...]] = {
 }
 
 # 화면에서 편집하는 파라미터 키 — DB 문서에 이 키로 저장된다.
-EDITABLE_CONFIG_KEYS: tuple[str, ...] = ("trigger_pct", "round_size", "rounds")
+EDITABLE_CONFIG_KEYS: tuple[str, ...] = ("trigger_pct", "round_size", "rounds", "auto_order")
 
 # 편집 가능 범위 — 화면 입력과 API 가 같은 한계를 쓴다.
 PCT_MIN, PCT_MAX = 0.1, 50.0
@@ -65,12 +65,12 @@ ROUND_SIZE_MAX = (2**53 - 1) // ROUND_SIZE_UNIT_KRW
 ROUNDS_MIN, ROUNDS_MAX = 1, 20
 
 
-def validate_strategy_trade_config(values: dict[str, Any]) -> dict[str, float | int]:
+def validate_strategy_trade_config(values: dict[str, Any]) -> dict[str, float | int | bool]:
     """편집 파라미터를 검증해 정규화된 dict 를 반환한다. 실패 시 ValueError."""
     if not isinstance(values, dict):
         raise ValueError("설정 형식이 올바르지 않습니다.")
 
-    cleaned: dict[str, float | int] = {}
+    cleaned: dict[str, float | int | bool] = {}
 
     raw_pct = values.get("trigger_pct")
     if not isinstance(raw_pct, (int, float)) or isinstance(raw_pct, bool):
@@ -92,6 +92,12 @@ def validate_strategy_trade_config(values: dict[str, Any]) -> dict[str, float | 
     if not ROUNDS_MIN <= rounds <= ROUNDS_MAX:
         raise ValueError(f"'회차 수' 는 {ROUNDS_MIN}~{ROUNDS_MAX} 사이여야 합니다.")
     cleaned["rounds"] = rounds
+
+    # 자동 주문 — 켜면 자동 신호를 슬랙 발송과 함께 버튼 주문과 같은 경로로 바로 주문한다.
+    auto_order = values.get("auto_order")
+    if not isinstance(auto_order, bool):
+        raise ValueError("'자동 주문' 은 참·거짓이어야 합니다.")
+    cleaned["auto_order"] = auto_order
 
     return cleaned
 
