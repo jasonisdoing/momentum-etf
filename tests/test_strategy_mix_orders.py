@@ -258,7 +258,7 @@ class MixOrderTest(TestCase):
             patch.object(order_store, "place_limit_order", return_value={"order_no": "123", "message": ""}) as broker,
             patch.object(slack, "_update_message") as update,
             patch.object(slack, "send_thread_message") as send,
-            patch.object(slack, "_sync_thread"),
+            patch.object(slack, "sync_signal_thread"),
         ):
             slack._place(target)
         broker.assert_called_once_with("a1", "sell", "ETF", 36, 100, "KRX")

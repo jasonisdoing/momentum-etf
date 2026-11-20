@@ -67,7 +67,7 @@ from utils.strategy_trade_orders import (
     signal_thread_state,
     signal_threads,
 )
-from utils.strategy_trade_signal_lock import signal_lock
+from utils.strategy_trade_signal_lock import signal_lock, signal_thread_lock
 from utils.strategy_trade_threads import (
     can_withdraw_signal,
     finish_order_reservation,
@@ -730,13 +730,7 @@ def _settle_message(target: dict[str, Any], outcome: str) -> None:
     if thread is None or all(message["ts"] != target["message_ts"] for message in thread["messages"]):
         return
     settle_signal_message(target["thread_ts"], target["message_ts"], outcome)
-    _sync_thread(target["thread_ts"])
-
-
-def _sync_thread(thread_ts: str) -> None:
-    thread = find_signal_thread(thread_ts)
-    if thread is not None:
-        sync_signal_thread(thread)
+    sync_signal_thread(target["thread_ts"])
 
 
 def _release_reservation(target: dict[str, Any]) -> None:
@@ -759,7 +753,7 @@ def _run_post_order_updates(target: dict[str, Any], thread_text: str, blocks: li
         futures = [
             executor.submit(_safe, send_thread_message, thread_text, thread_ts=target["thread_ts"]),
             executor.submit(_safe, _update_message, target, blocks),
-            executor.submit(_safe, _sync_thread, target["thread_ts"]),
+            executor.submit(_safe, sync_signal_thread, target["thread_ts"]),
         ]
         for future in futures:
             future.result()
@@ -1014,11 +1008,21 @@ def _react(method: str, channel: str, ts: str, name: str) -> None:
             logger.error("슬랙 반응 %s(%s) 실패: %s", method, name, error)
 
 
-def sync_signal_thread(thread: dict[str, Any]) -> str | None:
+def sync_signal_thread(thread_ts: str) -> str | None:
     """신호 메시지 반응을 스레드 상태 하나(⏳·✅·❌·없음)로 맞춘다 — 다른 반응은 뗀다. 완료한 스레드는 추적을 끝낸다.
 
     반응을 다는 곳은 이 함수 하나다. 상태는 주문 메시지별 주문 결과와 남긴 결과로 정한다(`signal_thread_state`).
+    버튼 처리와 배치가 같은 스레드를 동시에 맞추면 옛 상태의 반응이 뒤늦게 달려 남으므로, 스레드별 잠금 안에서
+    최신 기록을 다시 읽어 맞춘다. 이미 추적이 끝난 스레드면 할 일이 없어 None 이다.
     """
+    with signal_thread_lock(thread_ts):
+        thread = find_signal_thread(thread_ts)
+        if thread is None:
+            return None
+        return _apply_thread_reaction(thread)
+
+
+def _apply_thread_reaction(thread: dict[str, Any]) -> str | None:
     state = signal_thread_state(signal_message_states(thread))
     channel, thread_ts = thread["channel"], thread["thread_ts"]
     if state != thread["reaction"]:
@@ -1042,7 +1046,7 @@ def sync_signal_thread(thread: dict[str, Any]) -> str | None:
 
 def sync_signal_threads() -> int:
     """추적 중인 신호 스레드의 반응을 모두 맞춘다(체결·취소 결과가 반영된 뒤) — 완료한 스레드 수."""
-    return sum(sync_signal_thread(thread) == MESSAGE_DONE for thread in signal_threads())
+    return sum(sync_signal_thread(thread["thread_ts"]) == MESSAGE_DONE for thread in signal_threads())
 
 
 def close_session_threads(strategies: list[dict[str, Any]]) -> int:
@@ -1080,8 +1084,7 @@ def close_session_threads(strategies: list[dict[str, Any]]) -> int:
                 _update_message(target, _note_blocks(request, _SESSION_CLOSED_NOTE))
                 settle_signal_message(thread_ts, ts, MESSAGE_FAILED)
                 closed += 1
-        refreshed = find_signal_thread(thread_ts)
-        if refreshed is not None and sync_signal_thread(refreshed) not in (MESSAGE_PENDING, MESSAGE_PLACED):
+        if sync_signal_thread(thread_ts) not in (MESSAGE_PENDING, MESSAGE_PLACED):
             forget_signal_thread(thread_ts)
     return closed
 
