@@ -127,19 +127,27 @@ jobs:
 
           # 프론트(web/)·문서·워크플로우·APP_VERSION 만 바뀐 배포에서는 scheduler 재시작을 건너뛴다.
           if [ "$PREV_SHA" = "$NEW_SHA" ] || git diff --name-only "$PREV_SHA" "$NEW_SHA" | grep -qvE '^(web/|docs/|\.github/|README\.md$|utils/logger\.py$)'; then
-            # 재시작 직전 배포 잠금을 다시 걸고, 워커(1초 polling)가 잠금을 본 뒤에 실행 중 배치를 센다 —
-            # 대기 확인 직후 pending 배치가 실행되어 재시작에 끊기는 경쟁을 막는다.
+            # 재시작 직전 배포 잠금을 다시 건 뒤 실행 중 배치를 센다 — 잠금 뒤의 claim 은 워커가 되돌린다
+            # (`batch_queue.claim_next_pending`), 그 전 claim 은 running 으로 세어진다.
             .venv/bin/python infra/cron/deploy_flag_set.py
-            sleep 3
-            # 실행 중인 서버 배치가 있으면 최대 600초(10분)까지 자연 종료를 기다린다.
+            # 실행 중인 서버 배치가 있으면 최대 600초(10분)까지 자연 종료를 기다린다. 건수를 못 세면 배포를 멈춘다.
+            RUNNING_CNT=""
             for i in $(seq 1 120); do
-              RUNNING_CNT=$(.venv/bin/python -c "from utils.db_manager import get_db_connection; db=get_db_connection(); print(db.batch_queue.count_documents({'status':'running','app_type':'Server'}) if db is not None else 0)" 2>/dev/null || echo 0)
+              RUNNING_CNT=$(.venv/bin/python -c "from utils.db_manager import get_db_connection; db=get_db_connection(); assert db is not None, 'DB 연결 실패'; print(db.batch_queue.count_documents({'status':'running','app_type':'Server'}))" 2>/dev/null | tail -n 1 || true)
               if [ "${RUNNING_CNT}" = "0" ]; then
                 break
               fi
-              echo ">>> 실행 중인 서버 배치 ${RUNNING_CNT}건 종료 대기 (${i}/120)..."
+              echo ">>> 실행 중인 서버 배치 ${RUNNING_CNT:-?}건 종료 대기 (${i}/120)..."
               sleep 5
             done
+            if [ "${RUNNING_CNT}" != "0" ]; then
+              # 실행 중인 배치를 끊지 않는다 — scheduler 재시작을 보류하고 실패로 알린다(롤백하지 않는다:
+              # fastapi·web 은 이미 새 버전이고, 배치는 새 코드로 뜬다). 재시작은 배치가 끝난 뒤 직접 한다.
+              ROLLBACK_READY=0
+              echo "fail_reason=실행 중인 서버 배치 ${RUNNING_CNT:-?}건이 10분 안에 끝나지 않아 scheduler 재시작을 보류했습니다 — 배치 종료 후 수동 재시작 필요" >> "$GITHUB_OUTPUT"
+              echo ">>> 실행 중인 배치가 남아 scheduler 재시작 보류" >&2
+              exit 1
+            fi
             launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.scheduler"
           else
             echo ">>> Python/배치 변경 없음 — scheduler 재시작 생략"
@@ -206,6 +214,7 @@ jobs:
           ROLLBACK_SHA: ${{ steps.deploy.outputs.rollback_sha }}
           ROLLBACK_VERSION: ${{ steps.deploy.outputs.rollback_version }}
           ROLLBACK_MSG: ${{ steps.deploy.outputs.rollback_msg }}
+          FAIL_REASON: ${{ steps.deploy.outputs.fail_reason }}
         shell: bash
         run: |
           cd "$APP_DIR"
@@ -216,6 +225,7 @@ jobs:
               f"Repo: {os.environ['GITHUB_REPOSITORY']}",
               f"Commit: {os.environ['GITHUB_SHA']}",
               f"Message: {os.environ['COMMIT_MSG']}",
+              *([f"사유: {os.environ['FAIL_REASON']}"] if os.environ.get("FAIL_REASON") else []),
               f"DISK_FREE: {os.environ['DISK_FREE']}",
               f"DISK_USE: {os.environ['DISK_USE']}",
               f"APP_SIZE: {os.environ['APP_SIZE']} / DB_SIZE: {os.environ['DB_SIZE']}",

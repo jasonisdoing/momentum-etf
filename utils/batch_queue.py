@@ -246,8 +246,21 @@ def claim_next_pending() -> dict[str, Any] | None:
             skipped_ids.append(candidate["_id"])
             continue
         if claimed is not None:
+            # 잠금 확인과 claim 사이에 배포가 시작됐을 수 있다 — claim 뒤에 다시 보고, 배포 중이면 대기열로 되돌린다.
+            # 배포는 잠금을 건 **뒤에** 실행 중 건수를 세므로, 그 전에 claim 된 것은 세어지고 그 뒤 claim 은 여기서 풀린다.
+            if is_deploy_locked():
+                _unclaim(coll, claimed["_id"])
+                return None
             return claimed
         # 그 사이 다른 워커가 이 문서를 집어갔다 — 같은 조건으로 다음 후보를 본다.
+
+
+def _unclaim(coll: Any, item_id: Any) -> None:
+    """방금 claim 한 항목을 실행 전 상태(pending)로 되돌린다 — 자식 프로세스를 띄우기 전에만 쓴다."""
+    coll.update_one(
+        {"_id": item_id, "status": STATUS_RUNNING},
+        {"$set": {"status": STATUS_PENDING, "started_at": None, "last_heartbeat": None}, "$unset": {"app_type": ""}},
+    )
 
 
 def update_heartbeat(item_id: Any) -> None:
