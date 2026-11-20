@@ -554,6 +554,7 @@ def submit_order_record(base: dict[str, Any], side: str, price: int | float) -> 
             {"$set": {"status": "rejected", "message": str(exc), "updated_at": _now().isoformat()}},
         )
         raise
+    accepted_at = _now().isoformat()
     orders.update_one(
         {"_id": inserted.inserted_id},
         {
@@ -561,7 +562,9 @@ def submit_order_record(base: dict[str, Any], side: str, price: int | float) -> 
                 "status": "pending",
                 "order_no": placed["order_no"],
                 "message": placed["message"],
-                "updated_at": _now().isoformat(),
+                # 증권사 접수가 끝난 시각 — `updated_at` 은 체결 갱신이 덮어써서, 접수 알림이 늦을 때 원인 구간을 가르려고 따로 남긴다.
+                "placed_at": accepted_at,
+                "updated_at": accepted_at,
             }
         },
     )
