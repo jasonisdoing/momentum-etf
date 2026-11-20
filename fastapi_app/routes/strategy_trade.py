@@ -105,6 +105,15 @@ def post_manual_signal(payload: dict = Body(...), _: None = Depends(require_inte
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _resolve_trade_thread_ts(key_or_ts: str) -> str:
+    from utils.strategy_trade_notify import _load_sent_log
+
+    entry = _load_sent_log().get(key_or_ts)
+    if entry and entry.get("signal_ts"):
+        return str(entry["signal_ts"])
+    return key_or_ts
+
+
 @router.get("/signal-action")
 def get_trade_signal_action(
     account_id: str,
@@ -117,10 +126,11 @@ def get_trade_signal_action(
     """전략 사고팔기 웹 통합 모달에서 슬랙 신호의 실시간 상태를 조회한다."""
     from utils.slack_mock_orders import describe_slack_thread_action
 
+    resolved_ts = _resolve_trade_thread_ts(thread_ts)
     try:
         state, _, _ = describe_slack_thread_action(
             account_id,
-            thread_ts,
+            resolved_ts,
             side=side,
             round_no=round_no,
             ticker=ticker,
@@ -138,18 +148,19 @@ def post_trade_signal_action(payload: dict = Body(...), _: None = Depends(requir
 
     kind = str(payload.get("kind") or "").strip()
     account_id = str(payload.get("account_id") or "").strip()
-    thread_ts = str(payload.get("thread_ts") or "").strip()
+    raw_ts = str(payload.get("thread_ts") or "").strip()
     side = payload.get("side")
     round_no = payload.get("round_no")
     ticker = payload.get("ticker")
     order_id = payload.get("order_id")
-    if not kind or not account_id or not thread_ts:
+    if not kind or not account_id or not raw_ts:
         raise HTTPException(status_code=400, detail="kind·account_id·thread_ts 가 필요합니다.")
+    resolved_ts = _resolve_trade_thread_ts(raw_ts)
     try:
         execute_slack_thread_action(
             kind,
             account_id,
-            thread_ts,
+            resolved_ts,
             order_id=str(order_id) if order_id else None,
             ticker=str(ticker) if ticker else None,
             side=str(side) if side else None,
@@ -157,7 +168,7 @@ def post_trade_signal_action(payload: dict = Body(...), _: None = Depends(requir
         )
         state, _, _ = describe_slack_thread_action(
             account_id,
-            thread_ts,
+            resolved_ts,
             side=str(side) if side else None,
             round_no=int(round_no) if round_no is not None else None,
             ticker=str(ticker) if ticker else None,

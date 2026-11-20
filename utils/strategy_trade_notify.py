@@ -178,8 +178,6 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
     label = strategy_view["label"]
     country = strategy_view["country"]
     index = strategy_view["index"]
-    gap_pct = strategy_view["config"]["trigger_pct"]
-    buy_base = strategy_view["status"]["last_buy_price"] or index["prev_close"]
     triggers: list[dict[str, Any]] = []
     for row in strategy_view["rounds"]:
         if row["held"] and row["sell_reached"]:
@@ -287,6 +285,7 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
         signal_ts = entry.get("signal_ts")
         slack_keys[(sid, entry["round"], entry["action"])] = {
             "key": key,
+            "thread_ts": signal_ts,
             "can_withdraw": bool(signal_ts and can_withdraw_signal(signal_ts)),
             "manual": entry.get("origin") == "manual",
         }

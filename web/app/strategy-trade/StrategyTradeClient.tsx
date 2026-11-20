@@ -123,7 +123,13 @@ export type RoundRow = {
   is_next: boolean;
 };
 
-export type SlackSignal = { side: "buy" | "sell"; key: string; can_withdraw: boolean; manual: boolean };
+export type SlackSignal = {
+  side: "buy" | "sell";
+  key: string;
+  thread_ts?: string | null;
+  can_withdraw: boolean;
+  manual: boolean;
+};
 
 export type StrategyView = {
   strategy_id: string;
@@ -1915,9 +1921,10 @@ export function StrategyTradeClient() {
       const accountOption = view.account_options.find((account) => account.account_id === view.account_id);
       const accountLabel = accountOption ? `${accountOption.name} (${accountOption.account_id})` : view.account_id;
       const sideLabel = signal.side === "sell" && row.rebuy_after_sell ? "매도후재매수" : SIDE_WORDS[signal.side];
+      const threadTs = signal.thread_ts ?? signal.key;
       const params = new URLSearchParams({
         account_id: view.account_id,
-        thread_ts: signal.key,
+        thread_ts: threadTs,
         side: signal.side,
         round_no: String(row.round),
         ticker: row.ticker,
@@ -1936,7 +1943,7 @@ export function StrategyTradeClient() {
         withdrawUrl: "/api/strategy-trade/withdraw-signal",
         actionPayload: {
           account_id: view.account_id,
-          thread_ts: signal.key,
+          thread_ts: threadTs,
           side: signal.side,
           round_no: row.round,
           ticker: row.ticker,
