@@ -970,7 +970,8 @@ def _build_strategy_view(
         "cash": cash,
         "status": {
             "held_count": held_rounds,
-            "waiting_first_entry": held_rounds == 0,
+            # 회차 수 0(대기) 전략은 1호도 사지 않는다.
+            "waiting_first_entry": held_rounds == 0 and max_rounds > 0,
             # 보유가 없을 때 다음 1호 매수 시각(한국시간).
             "first_entry_time": _next_first_entry_time(country),
             "next_round": (held_rounds + 1) if held_rounds < max_rounds else None,

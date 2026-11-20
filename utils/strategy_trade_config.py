@@ -62,7 +62,8 @@ PCT_MIN, PCT_MAX = 2.0, 50.0
 ROUND_SIZE_UNIT_KRW = 10_000
 DEFAULT_ROUND_SIZE = 100
 ROUND_SIZE_MAX = (2**53 - 1) // ROUND_SIZE_UNIT_KRW
-ROUNDS_MIN, ROUNDS_MAX = 1, 20
+# 회차 수 0 = 목록에만 두고 사고팔지 않는 대기 — 보유 회차 이상만 저장되므로 보유가 없는 전략만 0 이 된다.
+ROUNDS_MIN, ROUNDS_MAX = 0, 20
 
 
 def validate_strategy_trade_config(values: dict[str, Any]) -> dict[str, float | int | bool]:
