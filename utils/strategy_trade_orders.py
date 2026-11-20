@@ -37,6 +37,7 @@ from services.broker_trade_service import (
 from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
 from utils.db_manager import get_db_connection
 from utils.market_session import is_instrument_trading_time
+from utils.portfolio_io import return_pct_from_avg_price
 from utils.strategy_trade_config import round_buy_quantity
 from utils.strategy_trade_ledger import REGULAR_SELL, is_buy
 from utils.strategy_trade_market import (
@@ -231,6 +232,18 @@ def _require_order_allowed(account_id: str, env: str, amount: int, count: int) -
         )
 
 
+def _profit_metrics(strategy: dict[str, Any], row: dict[str, Any] | None, price: int | float) -> dict[str, Any]:
+    """주문 호가 기준 종목 전체 수익률(평균단가 대비)과 회차 수익률(매수 체결가 대비)을 계산한다."""
+    avg_price = strategy["status"].get("average_price")
+    fill_price = (row.get("fill_price") or row.get("buy_price")) if row is not None and row.get("held", True) else None
+    return {
+        "average_price": avg_price,
+        "stock_profit_pct": return_pct_from_avg_price(price, avg_price) if avg_price else None,
+        "round_fill_price": fill_price,
+        "round_profit_pct": return_pct_from_avg_price(price, fill_price) if fill_price else None,
+    }
+
+
 def resolve_order(
     account_id: str,
     pool: str,
@@ -299,6 +312,7 @@ def resolve_order(
         "country": strategy["country"],
         "instrument_kind": strategy["instrument_kind"],
         "arbitrary_id": arbitrary_id,
+        **_profit_metrics(strategy, row, price),
     }
 
 
@@ -393,6 +407,7 @@ def resolve_swap(account_id: str, pool: str, strategy_id: str, round_no: int, *,
         "venue": venue,
         "country": strategy["country"],
         "instrument_kind": strategy["instrument_kind"],
+        **_profit_metrics(strategy, row, quote["ask"]),
     }
 
 

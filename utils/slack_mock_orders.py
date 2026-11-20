@@ -387,6 +387,23 @@ def _quote_depth_text(order: dict[str, Any], marks: dict[tuple[str, int], str]) 
     return f"{basis}\n```" + "\n".join(lines) + "```"
 
 
+def _profit_summary_line(request: dict[str, Any], order: dict[str, Any]) -> str | None:
+    """사고팔기 주문 확인 모달용 종목·회차 수익률 한 줄 요약 — 합성은 None."""
+    if request.get("mix_action_key") is not None:
+        return None
+    parts: list[str] = []
+    if order.get("stock_profit_pct") is not None and order.get("average_price") is not None:
+        parts.append(
+            f"종목 수익률 *{order['stock_profit_pct']:+.2f}%* (평단 {format_money(order['average_price'], order['country'])})"
+        )
+    if order.get("round_profit_pct") is not None and order.get("round_fill_price") is not None:
+        round_label = f"{request['round']}호 수익률" if request.get("round") is not None else "회차 수익률"
+        parts.append(
+            f"{round_label} *{order['round_profit_pct']:+.2f}%* (체결 {format_money(order['round_fill_price'], order['country'])})"
+        )
+    return " · ".join(parts) if parts else None
+
+
 def _order_price_details(request: dict[str, Any], order: dict[str, Any]) -> str:
     price = format_money(order["price"], order["country"])
     # 매수는 매수 1호가, 매도는 매도 1호가로 낸다 — 표에서 그 줄을 짚는다.
@@ -401,11 +418,13 @@ def _order_price_details(request: dict[str, Any], order: dict[str, Any]) -> str:
             f"*신호 대비 {gap_pct:+.2f}%* — {_gap_label(request['side'], gap_pct)}\n"
             f"신호 {format_money(order['signal_price'], order['country'])} · {order['quote_label']} {price}"
         )
+    profit_line = _profit_summary_line(request, order)
     guide = (
         f"주문을 확정하는 순간의 {order['quote_label']}로 {_env_word(request['env'])} 계좌에 보냅니다. "
         "호가가 움직이면 가격과 매수 수량이 달라질 수 있습니다."
     )
-    return f"{gap}\n{depth}\n{guide}"
+    sections = [gap, *([profit_line] if profit_line else []), depth, guide]
+    return "\n".join(sections)
 
 
 def _order_view(request: dict[str, Any], order: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
@@ -417,16 +436,23 @@ def _order_view(request: dict[str, Any], order: dict[str, Any], target: dict[str
 
 def _swap_view(request: dict[str, Any], order: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
     signal_gap = (order["sell_price"] / order["signal_price"] - 1.0) * 100.0
-    body = (
-        f"*{_order_text({**request, **order})}*\n{_account_line(request)}\n"
-        f"매도 {format_money(order['sell_price'], order['country'])}(매도 1호가) · 매수 {format_money(order['buy_price'], order['country'])}(매수 1호가)\n"
-        f"매도 신호 {format_money(order['signal_price'], order['country'])} 대비 {signal_gap:+.2f}%\n"
-        f"{_quote_depth_text(order, {('asks', 1): '매도', ('bids', 1): '재매수'})}\n"
+    profit_line = _profit_summary_line(request, order)
+    lines = [
+        f"*{_order_text({**request, **order})}*",
+        _account_line(request),
+        f"매도 {format_money(order['sell_price'], order['country'])}(매도 1호가) · 매수 {format_money(order['buy_price'], order['country'])}(매수 1호가)",
+        f"매도 신호 {format_money(order['signal_price'], order['country'])} 대비 {signal_gap:+.2f}%",
+        *([profit_line] if profit_line else []),
+        _quote_depth_text(order, {("asks", 1): "매도", ("bids", 1): "재매수"}),
         f"확정하는 순간의 호가로 {_env_word(request['env'])} 계좌에 매도·매수 지정가를 함께 겁니다. "
-        "호가가 움직이면 가격과 재매수 수량이 달라질 수 있습니다."
-    )
+        "호가가 움직이면 가격과 재매수 수량이 달라질 수 있습니다.",
+    ]
     return _modal_view(
-        ORDER_CALLBACK_ID, f"{_env_word(request['env'])} 매도 후 재매수 확인", "매도·매수 주문", body, target
+        ORDER_CALLBACK_ID,
+        f"{_env_word(request['env'])} 매도 후 재매수 확인",
+        "매도·매수 주문",
+        "\n".join(lines),
+        target,
     )
 
 
@@ -1213,25 +1239,37 @@ def describe_slack_thread_action(
 
     if _is_swap(request):
         price = order["sell_price"]
+        quantity = order["sell_quantity"]
         quote_label = "매도 1호가 · 재매수 1호가"
         venue = order["venue"]
+        signal_gap_pct = (
+            (order["sell_price"] / order["signal_price"] - 1.0) * 100.0 if order.get("signal_price") else None
+        )
     else:
         price = order["price"]
+        quantity = order["quantity"]
         quote_label = order.get("quote_label") or ("매도 1호가" if request["side"] == "buy" else "매수 1호가")
         venue = order["venue"]
+        signal_gap_pct = _signal_gap_pct(order)
 
+    is_trade = request.get("mix_action_key") is None
     return (
         {
             "phase": "ready_to_order",
             "status_label": "주문 대기",
             "thread_ts": thread_ts,
             "order_preview": {
-                "quantity": order["quantity"],
+                "quantity": quantity,
                 "price": price,
-                "amount": price * order["quantity"],
+                "amount": price * quantity,
                 "quote_label": quote_label,
                 "venue": venue,
                 "country": order["country"],
+                "signal_gap_pct": signal_gap_pct if is_trade else None,
+                "stock_profit_pct": order.get("stock_profit_pct") if is_trade else None,
+                "average_price": order.get("average_price") if is_trade else None,
+                "round_profit_pct": order.get("round_profit_pct") if is_trade else None,
+                "round_fill_price": order.get("round_fill_price") if is_trade else None,
             },
             "withdraw_key": withdraw_key,
         },

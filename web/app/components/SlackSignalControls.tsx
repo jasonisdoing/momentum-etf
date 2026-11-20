@@ -62,6 +62,11 @@ type SignalActionState = {
     quote_label: string;
     venue: string;
     country: string;
+    signal_gap_pct?: number | null;
+    stock_profit_pct?: number | null;
+    average_price?: number | null;
+    round_profit_pct?: number | null;
+    round_fill_price?: number | null;
   };
   order?: {
     id: string;
@@ -314,6 +319,61 @@ export function SlackSignalActionModal({ target, onClose, onChanged, onWithdrawn
                 </dd>
                 <dt>예상 금액</dt>
                 <dd style={{ margin: 0 }}>{formatCurrencyPrice(state.order_preview.amount, target.currency)}</dd>
+                {state.order_preview.signal_gap_pct != null ? (
+                  <>
+                    <dt>신호 대비</dt>
+                    <dd style={{ margin: 0 }}>
+                      {state.order_preview.signal_gap_pct >= 0 ? "+" : ""}
+                      {state.order_preview.signal_gap_pct.toFixed(2)}%
+                    </dd>
+                  </>
+                ) : null}
+                {state.order_preview.stock_profit_pct != null ? (
+                  <>
+                    <dt>종목 수익률</dt>
+                    <dd
+                      style={{
+                        margin: 0,
+                        color:
+                          state.order_preview.stock_profit_pct > 0
+                            ? "var(--up-color, #d64545)"
+                            : state.order_preview.stock_profit_pct < 0
+                              ? "var(--down-color, #2f6fd0)"
+                              : "inherit",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {state.order_preview.stock_profit_pct >= 0 ? "+" : ""}
+                      {state.order_preview.stock_profit_pct.toFixed(2)}%
+                      {state.order_preview.average_price != null
+                        ? ` (평단 ${formatCurrencyPrice(state.order_preview.average_price, target.currency)})`
+                        : ""}
+                    </dd>
+                  </>
+                ) : null}
+                {state.order_preview.round_profit_pct != null ? (
+                  <>
+                    <dt>회차 수익률</dt>
+                    <dd
+                      style={{
+                        margin: 0,
+                        color:
+                          state.order_preview.round_profit_pct > 0
+                            ? "var(--up-color, #d64545)"
+                            : state.order_preview.round_profit_pct < 0
+                              ? "var(--down-color, #2f6fd0)"
+                              : "inherit",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {state.order_preview.round_profit_pct >= 0 ? "+" : ""}
+                      {state.order_preview.round_profit_pct.toFixed(2)}%
+                      {state.order_preview.round_fill_price != null
+                        ? ` (체결 ${formatCurrencyPrice(state.order_preview.round_fill_price, target.currency)})`
+                        : ""}
+                    </dd>
+                  </>
+                ) : null}
               </dl>
               <p style={{ margin: "8px 0 0", color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
                 실행 시 슬랙과 같은 락·중복 검사 후 주문을 접수하고 슬랙 스레드 버튼도 함께 갱신합니다.
