@@ -726,7 +726,7 @@ def notify_strategy_trade() -> dict[str, Any]:
 
 def _notify_prepared_view(view: dict[str, Any], settings_at_read: dict[str, Any], snapshot_at: str) -> dict[str, Any]:
     """공유 잠금 아래 최신 발송 기록을 읽어 회수·체결 확인·발송을 처리한다."""
-    from utils.strategy_trade_orders import active_order_keys
+    from utils.strategy_trade_orders import active_order_keys, finished_since_keys
     from utils.strategy_trade_threads import mark_signal_thread_used, record_signal_thread
 
     now = datetime.now(KST)
@@ -776,7 +776,10 @@ def _notify_prepared_view(view: dict[str, Any], settings_at_read: dict[str, Any]
     ]
     if triggers:
         # 주문이 진행 중이면 신호를 생략한다. 매도 후 재매수는 양쪽을 확인한다.
-        in_flight = active_order_keys([strategy["strategy_id"] for strategy in open_strategies])
+        # 원장을 계산한 뒤(`snapshot_at` 이후) 끝난 주문도 생략한다 — 원장이 그 체결을 아직 몰라 같은 회차 트리거가
+        # 다시 나오는데, 신호 기록은 주문 기록으로 체결 판정돼 지워지므로 거르지 않으면 같은 신호가 또 나간다.
+        strategy_ids = [strategy["strategy_id"] for strategy in open_strategies]
+        in_flight = active_order_keys(strategy_ids) | finished_since_keys(strategy_ids, snapshot_at)
         triggers = [
             trigger
             for trigger in triggers

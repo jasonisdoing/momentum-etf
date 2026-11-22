@@ -33,6 +33,10 @@ class MemoryCollection:
                 if any(self.matches(doc, item) for item in expected):
                     return False
                 continue
+            if key == "$or":
+                if not any(self.matches(doc, item) for item in expected):
+                    return False
+                continue
             value = doc
             for part in key.split("."):
                 value = value.get(part) if isinstance(value, dict) else None
@@ -46,11 +50,13 @@ class MemoryCollection:
                         return False
                     if op == "$lt" and (value is None or value >= target):
                         return False
+                    if op == "$in" and value not in target:
+                        return False
             elif value != expected:
                 return False
         return True
 
-    def find(self, query):
+    def find(self, query, projection=None):
         with self.lock:
             return deepcopy([d for d in self.docs if self.matches(d, query)])
 
@@ -321,6 +327,24 @@ class ManualSignalsTest(TestCase):
         self.assertFalse(threads.reserve_signal_for_order("1", "1"))
         self.assertTrue(threads.reserve_signal_for_order("2", "2"))
         self.assertFalse(threads.reserve_signal_for_order("2", "2"))
+
+    def test_order_finished_after_ledger_snapshot_does_not_resend_signal(self):
+        notify.notify_strategy_trade()
+        signal_ts = self.sent["s1:1-buy"]["signal_ts"]
+        # 원장 계산 뒤 체결된 주문 — 원장은 아직 미보유라 같은 회차 트리거가 다시 나온다.
+        self.orders.insert_one(
+            {
+                "strategy_id": "s1",
+                "round": 1,
+                "side": "buy",
+                "slack": {"thread_ts": signal_ts, "message_ts": signal_ts},
+                "status": "filled",
+                "filled_quantity": 10,
+                "updated_at": "2999-01-01T00:00:00+09:00",
+            }
+        )
+        notify.notify_strategy_trade()
+        self.assertEqual(self.sender.call_count, 1)
 
     def test_partial_fill_not_complete(self):
         self.manual()

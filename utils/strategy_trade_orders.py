@@ -126,12 +126,11 @@ def thread_has_filled_order(thread_ts: str) -> bool:
     return _orders().find_one({"slack.thread_ts": thread_ts, "filled_quantity": {"$gt": 0}}, {"_id": 1}) is not None
 
 
-def active_order_keys(strategy_ids: list[str]) -> set[tuple[str, int | str, str]]:
-    """이 전략들의 아직 끝나지 않은 신호 주문 — (전략, 회차, 구분) 집합(화면 표시용)."""
+def _signal_order_keys(strategy_ids: list[str], status_filter: dict[str, Any]) -> set[tuple[str, int | str, str]]:
     records = _orders().find(
         {
             "strategy_id": {"$in": strategy_ids},
-            "status": {"$in": list(ACTIVE_STATUSES)},
+            **status_filter,
             "$or": [{"round": {"$ne": None}}, {"arbitrary_id": {"$ne": None}}],
         },
         {"strategy_id": 1, "round": 1, "side": 1, "arbitrary_id": 1},
@@ -139,6 +138,19 @@ def active_order_keys(strategy_ids: list[str]) -> set[tuple[str, int | str, str]
     return {
         (record["strategy_id"], record.get("arbitrary_id") or record["round"], record["side"]) for record in records
     }
+
+
+def active_order_keys(strategy_ids: list[str]) -> set[tuple[str, int | str, str]]:
+    """이 전략들의 아직 끝나지 않은 신호 주문 — (전략, 회차, 구분) 집합(화면 표시용)."""
+    return _signal_order_keys(strategy_ids, {"status": {"$in": list(ACTIVE_STATUSES)}})
+
+
+def finished_since_keys(strategy_ids: list[str], since: str) -> set[tuple[str, int | str, str]]:
+    """``since``(KST ISO) 이후에 끝난 신호 주문 — (전략, 회차, 구분) 집합.
+
+    그 시각 전에 계산한 원장은 이 주문의 체결을 아직 모를 수 있어, 그 원장으로 낸 트리거를 거르는 데 쓴다.
+    """
+    return _signal_order_keys(strategy_ids, {"status": {"$in": list(FINISHED_STATUSES)}, "updated_at": {"$gt": since}})
 
 
 def active_order_count(account_id: str) -> int:
