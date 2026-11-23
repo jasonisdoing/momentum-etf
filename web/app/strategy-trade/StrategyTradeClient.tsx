@@ -1023,6 +1023,8 @@ function AccountSettingsCard({
           />
         ),
     } satisfies ColDef<TradeListRow>,
+    { ...dailyChange, pinned: "left" },
+    { ...currentPrice, pinned: "left" },
     ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => {
       const pctFormatter =
         column.field === "pct"
@@ -1076,8 +1078,6 @@ function AccountSettingsCard({
         </span>
       ),
     } satisfies ColDef<TradeListRow>,
-    dailyChange,
-    currentPrice,
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned", cellStyle: { fontWeight: 700 } } satisfies ColDef<TradeListRow>,
     { ...quantity, headerName: "보유수량", width: 88 },
     tradeWeightColumn,
