@@ -1040,7 +1040,7 @@ function AccountSettingsCard({
         {
           ...column,
           ...pctFormatter,
-          pinned: "left",
+          pinned: column.field === "pct" ? "left" : undefined,
           type: "rightAligned",
           ...(column.field === "pct" ? { cellStyle: { fontWeight: 700 } } : {}),
           editable: ({ node, data }: { node: { rowPinned?: unknown }; data?: TradeListRow }) =>
