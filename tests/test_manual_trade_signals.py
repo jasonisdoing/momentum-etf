@@ -7,8 +7,11 @@ from types import SimpleNamespace
 from unittest import TestCase, main
 from unittest.mock import Mock, patch
 
+import requests
 from pymongo.errors import DuplicateKeyError
 
+from services import meritz_api_service as meritz
+from services.broker_api_service import BrokerApiError, OrderUncertainError
 from utils import slack_mock_orders as slack
 from utils import strategy_trade_notify as notify
 from utils import strategy_trade_orders as orders
@@ -779,6 +782,202 @@ class ManualSignalsTest(TestCase):
         with patch("utils.strategy_trade_ledger.is_buy", return_value=True):
             trades = _day_trades(rows, "ETF", datetime(2030, 1, 2).date(), sources)
         self.assertEqual([t.source for t in trades], ["manual", "manual_slack", "slack"])
+
+
+class MeritzOrderTransportTest(TestCase):
+    """주문 전 조회 복구와 주문 전송의 중복 방지를 외부 호출 없이 검증한다."""
+
+    def setUp(self):
+        self.response = Mock(status_code=200)
+        self.response.json.return_value = {"rsp_cd": "5766", "data": []}
+        patches = {
+            "token": patch.object(meritz, "_access_token", return_value="secret-token"),
+            "mac": patch.object(meritz, "_mac_address", return_value="secret-mac"),
+            "refresh": patch.object(meritz, "_issue_token", return_value="refreshed-token"),
+            "get": patch.object(meritz.requests, "get", return_value=self.response),
+            "post": patch.object(meritz.requests, "post", side_effect=AssertionError("실제 주문 금지")),
+            "sleep": patch.object(meritz.time, "sleep"),
+            "interval": patch.object(meritz, "_MIN_INTERVAL_SECONDS", 0),
+            "logger": patch.object(meritz, "logger"),
+            "db": patch("utils.db_manager.get_db_connection", side_effect=AssertionError("실제 DB 금지")),
+        }
+        self.mocks = {}
+        for name, item in patches.items():
+            self.mocks[name] = item.start()
+            self.addCleanup(item.stop)
+
+    def diagnostics(self):
+        return "\n".join(call.args[0] % call.args[1:] for call in self.mocks["logger"].method_calls)
+
+    def test_inquiry_recovers_after_connection_reset_and_timeout(self):
+        self.mocks["get"].side_effect = [
+            requests.ConnectionError(ConnectionResetError(54, "secret-token")),
+            requests.ReadTimeout("secret-mac"),
+            self.response,
+        ]
+        result = meritz._get("a1", meritz.HOLDINGS_PATH, {"private": "secret-query"})
+        self.assertEqual(result["rsp_cd"], "5766")
+        self.assertEqual(self.mocks["get"].call_count, 3)
+        self.mocks["post"].assert_not_called()
+        self.mocks["refresh"].assert_not_called()
+        self.assertEqual([call.args[0] for call in self.mocks["sleep"].call_args_list], [0.5, 1.0])
+        diagnostic = self.diagnostics()
+        for expected in (
+            meritz.HOLDINGS_PATH,
+            "account=a1",
+            "ConnectionResetError(errno=54)",
+            "ReadTimeout",
+            "outcome=recovered",
+            "attempts=3",
+            "elapsed_ms=",
+            "request_id=",
+        ):
+            self.assertIn(expected, diagnostic)
+        for secret in ("secret-token", "secret-mac", "secret-query", "authorization"):
+            self.assertNotIn(secret, diagnostic)
+
+    def test_exhausted_inquiry_never_submits_order(self):
+        self.mocks["get"].side_effect = requests.ConnectionError(ConnectionResetError(54, "private-message"))
+        with (
+            patch.object(orders, "account_env", return_value="live"),
+            patch.object(
+                orders, "resolve_order", side_effect=lambda *args, **kwargs: meritz._get("a1", meritz.HOLDINGS_PATH, {})
+            ),
+            patch.object(orders, "submit_order_record") as submit,
+        ):
+            with self.assertRaises(orders.OrderPrecheckError) as caught:
+                orders.place_order("a1", "test", "s1", "sell", 5, {"thread_ts": "root"})
+        self.assertIn("주문은 전송하지 않았습니다", str(caught.exception))
+        self.assertIn(meritz.HOLDINGS_PATH, str(caught.exception))
+        self.assertIn("추적 ID", str(caught.exception))
+        self.assertNotIn("private-message", str(caught.exception))
+        self.assertEqual(self.mocks["get"].call_count, 3)
+        submit.assert_not_called()
+        self.mocks["post"].assert_not_called()
+        self.assertIn("outcome=failed", self.diagnostics())
+
+    def test_recovered_precheck_submits_exactly_once(self):
+        self.response.json.return_value.update({"price": 100, "quantity": 4, "signal_price": 120})
+        self.mocks["get"].side_effect = [requests.ReadTimeout(), self.response]
+        with (
+            patch.object(orders, "account_env", return_value="live"),
+            patch.object(
+                orders,
+                "resolve_order",
+                side_effect=lambda *args, **kwargs: meritz._get("a1", meritz.ORDER_HISTORY_PATH, {}),
+            ),
+            patch.object(orders, "_require_no_duplicate"),
+            patch.object(orders, "_require_order_allowed"),
+            patch.object(orders, "_record_base", return_value={}),
+            patch.object(orders, "submit_order_record", return_value={"status": "pending"}) as submit,
+        ):
+            result = orders.place_order("a1", "test", "s1", "sell", 5, {"thread_ts": "root"})
+        self.assertEqual(result["status"], "pending")
+        self.assertEqual(self.mocks["get"].call_count, 2)
+        submit.assert_called_once()
+
+    def test_order_modify_cancel_posts_are_never_retried_on_network_errors(self):
+        for path in (meritz.ORDER_PATH["buy"], meritz.ORDER_PATH["sell"], meritz.MODIFY_PATH, meritz.CANCEL_PATH):
+            for failure in (requests.ConnectionError("secret-body"), requests.ReadTimeout("secret-body")):
+                with self.subTest(path=path, error=type(failure).__name__):
+                    self.mocks["post"].reset_mock()
+                    self.mocks["post"].side_effect = failure
+                    with self.assertRaises(OrderUncertainError) as caught:
+                        meritz._request(
+                            "a1", "POST", path, success=meritz._ORDER_CODES, body={"private": "secret-body"}
+                        )
+                    self.mocks["post"].assert_called_once()
+                    self.assertIn("접수 여부", str(caught.exception))
+                    self.assertNotIn("secret-body", str(caught.exception))
+        self.mocks["get"].assert_not_called()
+        self.mocks["refresh"].assert_not_called()
+        self.mocks["sleep"].assert_not_called()
+
+    def test_slack_reopens_only_known_unsent_order_not_uncertain_submission(self):
+        target = {
+            "request": {
+                "env": "live",
+                "account_id": "a1",
+                "ticker": "ETF",
+                "strategy_id": "s1",
+                "pool": "test",
+                "side": "sell",
+                "round": 5,
+                "label": "종목",
+                "quantity": 4,
+                "rebuy": False,
+            },
+            "channel": "test",
+            "message_ts": "reply",
+            "thread_ts": "root",
+        }
+        for failure, safe_to_retry in (
+            (orders.OrderPrecheckError("주문 전 조회 실패. 주문은 전송하지 않았습니다."), True),
+            (OrderUncertainError("접수 여부 불명"), False),
+        ):
+            with (
+                self.subTest(failure=type(failure).__name__),
+                patch.object(slack, "place_order", side_effect=failure),
+                patch.object(slack, "_update_message"),
+                patch.object(slack, "_note_blocks", return_value=[]),
+                patch.object(slack, "_open_blocks", return_value=[]) as reopen,
+                patch.object(slack, "send_thread_message") as send,
+                patch.object(slack, "_release_reservation") as release,
+                patch.object(slack, "logger"),
+            ):
+                self.assertIsNone(slack._place(target))
+                if safe_to_retry:
+                    release.assert_called_once_with(target)
+                    reopen.assert_called_once()
+                    self.assertIn("주문은 전송하지 않았습니다", send.call_args.args[0])
+                else:
+                    release.assert_not_called()
+                    reopen.assert_not_called()
+                    self.assertIn("접수 여부", send.call_args.args[0])
+        self.mocks["post"].assert_not_called()
+
+    def test_permanent_inquiry_errors_are_not_retried(self):
+        for error in (requests.exceptions.SSLError(), requests.exceptions.InvalidURL(), requests.RequestException()):
+            with self.subTest(error=type(error).__name__):
+                self.mocks["get"].reset_mock()
+                self.mocks["get"].side_effect = error
+                with self.assertRaises(BrokerApiError):
+                    meritz._get("a1", meritz.HOLDINGS_PATH, {})
+                self.mocks["get"].assert_called_once()
+        self.mocks["sleep"].assert_not_called()
+
+    def test_api_rejection_is_not_retried(self):
+        self.response.json.return_value = {"rsp_cd": "denied", "rsp_msg": "조회 거부"}
+        with self.assertRaises(BrokerApiError):
+            meritz._get("a1", meritz.HOLDINGS_PATH, {})
+        self.mocks["get"].assert_called_once()
+        self.mocks["refresh"].assert_not_called()
+        self.mocks["sleep"].assert_not_called()
+
+    def test_explicit_token_rejection_refreshes_only_once(self):
+        self.response.status_code = 401
+        self.response.json.return_value = {"rsp_cd": meritz._TOKEN_EXPIRED_CODE}
+        with self.assertRaises(meritz.MeritzTokenExpiredError):
+            meritz._get("a1", meritz.HOLDINGS_PATH, {})
+        self.assertEqual(self.mocks["get"].call_count, 2)
+        self.mocks["refresh"].assert_called_once_with("a1")
+        self.mocks["sleep"].assert_not_called()
+        self.assertIn("stage=authentication", self.diagnostics())
+
+    def test_token_refresh_does_not_reset_network_retry_budget(self):
+        token_error = Mock(status_code=401)
+        token_error.json.return_value = {"rsp_cd": meritz._TOKEN_EXPIRED_CODE}
+        self.mocks["get"].side_effect = [
+            requests.ReadTimeout(),
+            token_error,
+            requests.ReadTimeout(),
+            requests.ReadTimeout(),
+        ]
+        with self.assertRaises(BrokerApiError):
+            meritz._get("a1", meritz.HOLDINGS_PATH, {})
+        self.assertEqual(self.mocks["get"].call_count, 4)
+        self.mocks["refresh"].assert_called_once()
+        self.assertEqual(len(self.mocks["sleep"].call_args_list), 2)
 
 
 if __name__ == "__main__":

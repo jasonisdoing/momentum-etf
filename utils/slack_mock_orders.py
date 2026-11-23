@@ -38,6 +38,7 @@ from utils.strategy_trade_orders import (
     MESSAGE_OPEN,
     MESSAGE_PENDING,
     MESSAGE_PLACED,
+    OrderPrecheckError,
     RoundNotOrderableError,
     _orders,
     cancel_record,
@@ -759,6 +760,11 @@ def _run_post_order_updates(target: dict[str, Any], thread_text: str, blocks: li
             future.result()
 
 
+def _order_failure_text(label: str, exc: Exception) -> str:
+    """주문 전 미전송 오류와 전송 단계 오류의 표현을 공통으로 결정한다."""
+    return f"❌ {exc}" if isinstance(exc, OrderPrecheckError) else f"❌ {label} 주문 실패: {exc}"
+
+
 def _place_swap(target: dict[str, Any], *, reraise: bool = False) -> dict[str, Any] | None:
     """매도 후 재매수 한 짝을 낸다 — 결과를 스레드로 알리고 메시지에 양쪽 취소 버튼을 단다."""
     request = target["request"]
@@ -779,7 +785,7 @@ def _place_swap(target: dict[str, Any], *, reraise: bool = False) -> dict[str, A
         return None
     except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
         logger.exception("슬랙 매도 후 재매수 처리 실패")
-        send_thread_message(f"❌ {word} 주문 실패: {exc}", thread_ts=target["thread_ts"])
+        send_thread_message(_order_failure_text(word, exc), thread_ts=target["thread_ts"])
         _update_message(target, _open_blocks(request))
         _release_reservation(target)
         if reraise:
@@ -833,7 +839,7 @@ def _place(target: dict[str, Any], *, reraise: bool = False) -> dict[str, Any] |
         return None
     except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
         logger.exception("슬랙 모의 주문 처리 실패")
-        send_thread_message(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])
+        send_thread_message(_order_failure_text(side, exc), thread_ts=target["thread_ts"])
         _update_message(target, _open_blocks(request))
         _release_reservation(target)
         if reraise:

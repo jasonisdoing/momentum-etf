@@ -21,6 +21,7 @@ import time
 from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import requests
@@ -75,6 +76,8 @@ _STATE_REJECTED = "3"
 
 _MIN_INTERVAL_SECONDS = 1.0
 _REQUEST_TIMEOUT_SECONDS = 10
+# 일시적 조회 통신 오류만 재시도한다. 기존 최소 호출 간격은 별도로 유지한다.
+_INQUIRY_RETRY_DELAYS = (0.5, 1.0)
 _MAX_PAGES = 20
 # 만료 직전 토큰은 쓰지 않는다 — 요청 도중 만료되지 않게 여유를 둔다.
 _TOKEN_MARGIN_SECONDS = 60
@@ -179,6 +182,52 @@ def _message_of(data: dict[str, Any], response: requests.Response) -> str:
     return " · ".join(parts) or f"HTTP {response.status_code}"
 
 
+def _transport_detail(exc: BaseException) -> str:
+    """예외 메시지·요청 URL 대신 예외 종류와 시스템 오류 번호만 남긴다."""
+    pending, seen, details = [exc], set(), []
+    while pending:
+        current = pending.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        errno = getattr(current, "errno", None)
+        details.append(f"{type(current).__name__}(errno={errno})" if isinstance(errno, int) else type(current).__name__)
+        pending.extend(arg for arg in current.args if isinstance(arg, BaseException))
+        pending.extend(item for item in (current.__cause__, current.__context__) if item is not None)
+    return ">".join(dict.fromkeys(details))
+
+
+def _retryable_inquiry_error(exc: requests.RequestException) -> bool:
+    return isinstance(
+        exc, (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError)
+    ) and not isinstance(exc, requests.exceptions.SSLError)
+
+
+def _send_request(
+    method: str, path: str, token: str, mac: str, params: dict[str, str] | None, body: dict[str, Any] | None
+) -> requests.Response:
+    """호출 간격은 HTTP 요청마다 적용하고 재시도 대기 중에는 다른 요청을 막지 않는다."""
+    global _last_call_at
+    with _call_lock:
+        wait = _MIN_INTERVAL_SECONDS - (time.monotonic() - _last_call_at)
+        if wait > 0:
+            time.sleep(wait)
+        headers = {"authorization": f"Bearer {token}", "mac_address": mac}
+        try:
+            if method == "GET":
+                return requests.get(
+                    f"{BASE_URL}{path}", headers=headers, params=params, timeout=_REQUEST_TIMEOUT_SECONDS
+                )
+            return requests.post(
+                f"{BASE_URL}{path}",
+                headers={**headers, "content-type": "application/json; charset=utf-8"},
+                json=body,
+                timeout=_REQUEST_TIMEOUT_SECONDS,
+            )
+        finally:
+            _last_call_at = time.monotonic()
+
+
 def _request(
     account_id: str,
     method: str,
@@ -188,46 +237,99 @@ def _request(
     params: dict[str, str] | None = None,
     body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """요청 한 건 → 본문. 토큰 오류면 한 번만 재발급해 다시 보낸다. ``success`` 밖의 rsp_cd 는 BrokerApiError.
+    """조회 통신 오류만 제한적으로 재시도한다. POST 응답 불명은 재전송하지 않는다.
 
-    주문(POST)이 서버에 닿았는지 모르는 네트워크 오류는 `OrderUncertainError` 다 — 들어갔을 수도 있다.
+    인증 거부 응답의 토큰 재발급은 통신 재시도와 별도로 한 번만 허용한다.
     """
-    global _last_call_at
-    token = _access_token(account_id)
-    mac = _mac_address()
-    with _call_lock:
-        for attempt in range(2):
-            wait = _MIN_INTERVAL_SECONDS - (time.monotonic() - _last_call_at)
-            if wait > 0:
-                time.sleep(wait)
-            headers = {"authorization": f"Bearer {token}", "mac_address": mac}
-            try:
-                if method == "GET":
-                    response = requests.get(
-                        f"{BASE_URL}{path}", headers=headers, params=params, timeout=_REQUEST_TIMEOUT_SECONDS
-                    )
-                else:
-                    response = requests.post(
-                        f"{BASE_URL}{path}",
-                        headers={**headers, "content-type": "application/json; charset=utf-8"},
-                        json=body,
-                        timeout=_REQUEST_TIMEOUT_SECONDS,
-                    )
-            except requests.RequestException as exc:
-                error = OrderUncertainError if method == "POST" else BrokerApiError
-                raise error(f"메리츠증권 서버 응답을 받지 못했습니다: {exc}") from exc
-            finally:
-                _last_call_at = time.monotonic()
-            data = _json_of(response)
-            code = str(data.get("rsp_cd") or "")
-            if (response.status_code == 401 or code in _TOKEN_ERROR_CODES) and attempt == 0:
-                token = _issue_token(account_id)
+    if method not in ("GET", "POST"):
+        raise ValueError(f"지원하지 않는 메리츠 요청 방식입니다: {method}")
+    request_id = uuid4().hex[:12]
+    started = time.monotonic()
+    context = f"request_id={request_id} account={account_id} method={method} path={path}"
+    try:
+        token = _access_token(account_id)
+        mac = _mac_address()
+    except Exception as exc:
+        logger.error(
+            "[MERITZ] %s stage=authentication outcome=failed error=%s elapsed_ms=%.1f",
+            context,
+            type(exc).__name__,
+            (time.monotonic() - started) * 1000,
+        )
+        raise
+    attempt, retries, refreshed = 0, 0, False
+    while True:
+        attempt += 1
+        attempt_started = time.monotonic()
+        logger.info("[MERITZ] %s stage=request attempt=%s outcome=started", context, attempt)
+        try:
+            response = _send_request(method, path, token, mac, params, body)
+        except requests.RequestException as exc:
+            retry = method == "GET" and _retryable_inquiry_error(exc) and retries < len(_INQUIRY_RETRY_DELAYS)
+            logger.warning(
+                "[MERITZ] %s stage=transport attempt=%s outcome=%s error=%s attempt_elapsed_ms=%.1f elapsed_ms=%.1f",
+                context,
+                attempt,
+                "retrying" if retry else "failed",
+                _transport_detail(exc),
+                (time.monotonic() - attempt_started) * 1000,
+                (time.monotonic() - started) * 1000,
+            )
+            if retry:
+                delay = _INQUIRY_RETRY_DELAYS[retries]
+                retries += 1
+                time.sleep(delay)
                 continue
-            if code in success:
-                return data
-            error = MeritzTokenExpiredError if method == "GET" and code == _TOKEN_EXPIRED_CODE else BrokerApiError
-            raise error(f"메리츠증권 API 오류: {_message_of(data, response)} (코드 {code or '-'})")
-    raise AssertionError("unreachable")
+            error = OrderUncertainError if method == "POST" else BrokerApiError
+            # 원본 예외 문구에 인증 URL 등이 포함될 수 있어 안전한 진단 정보만 공개한다.
+            raise error(
+                f"메리츠증권 {'주문 접수 여부를 확인할 수 없습니다' if method == 'POST' else '조회 통신에 실패했습니다'}: "
+                f"{method} {path} · {_transport_detail(exc)} · {attempt}회 시도 · 추적 ID {request_id}"
+            ) from None
+        data = _json_of(response)
+        code = str(data.get("rsp_cd") or "")
+        logger.info(
+            "[MERITZ] %s stage=response attempt=%s http_status=%s rsp_cd=%s attempt_elapsed_ms=%.1f elapsed_ms=%.1f",
+            context,
+            attempt,
+            response.status_code,
+            code,
+            (time.monotonic() - attempt_started) * 1000,
+            (time.monotonic() - started) * 1000,
+        )
+        if (response.status_code == 401 or code in _TOKEN_ERROR_CODES) and not refreshed:
+            refreshed = True
+            logger.warning("[MERITZ] %s stage=authentication attempt=%s outcome=refreshing", context, attempt)
+            try:
+                token = _issue_token(account_id)
+            except Exception as exc:
+                logger.error(
+                    "[MERITZ] %s stage=authentication outcome=failed error=%s elapsed_ms=%.1f",
+                    context,
+                    type(exc).__name__,
+                    (time.monotonic() - started) * 1000,
+                )
+                raise
+            continue
+        if code in success:
+            logger.info(
+                "[MERITZ] %s outcome=%s attempts=%s retries=%s elapsed_ms=%.1f",
+                context,
+                "recovered" if retries else "success",
+                attempt,
+                retries,
+                (time.monotonic() - started) * 1000,
+            )
+            return data
+        logger.error(
+            "[MERITZ] %s stage=response outcome=rejected attempts=%s http_status=%s rsp_cd=%s",
+            context,
+            attempt,
+            response.status_code,
+            code,
+        )
+        error = MeritzTokenExpiredError if method == "GET" and code == _TOKEN_EXPIRED_CODE else BrokerApiError
+        raise error(f"메리츠증권 API 오류: {_message_of(data, response)} (코드 {code or '-'}, 추적 ID {request_id})")
 
 
 def _get(account_id: str, path: str, params: dict[str, str]) -> dict[str, Any]:

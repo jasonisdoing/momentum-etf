@@ -19,6 +19,7 @@ class MixOrderTest(TestCase):
     def setUp(self):
         self.request = {
             "env": "live",
+            "strategy_id": "mix",
             "account_id": "a1",
             "ticker": "ETF",
             "side": "buy",
@@ -236,6 +237,16 @@ class MixOrderTest(TestCase):
         self.positions["account"]["holdings"]["ETF"]["quantity"] = 120
         self.item["quantity"] = 16
         self.assertEqual(mix.resolve_mix_order(self.request, "root")["quantity"], 16)
+
+    def test_failed_precheck_preserves_confirmation_and_does_not_submit(self):
+        with (
+            patch.object(mix, "resolve_mix_order", side_effect=BrokerApiError("조회 통신 실패")),
+            patch.object(mix, "submit_order_record") as submit,
+        ):
+            with self.assertRaises(order_store.OrderPrecheckError):
+                mix.place_mix_order(self.request, self.target, {}, "confirmation")
+        self.db.update_one.assert_not_called()
+        submit.assert_not_called()
 
     def test_sell_uses_common_submission_and_cancel_controls(self):
         self.request["side"] = self.signal["side"] = self.item["side"] = "sell"

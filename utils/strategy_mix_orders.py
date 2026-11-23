@@ -19,6 +19,7 @@ from utils.strategy_trade_orders import (
     _now,
     _orders,
     _require_order_allowed,
+    order_precheck,
     register_signal_thread,
     require_order_session,
     resolve_order_quote,
@@ -364,7 +365,8 @@ def _terms_within_tolerance(confirmed: dict, current: dict) -> bool:
 
 
 def place_mix_order(request: dict, slack: dict, confirmed: dict, confirmation_id: str) -> dict:
-    order = resolve_mix_order(request, slack["thread_ts"])
+    with order_precheck(request["account_id"], request["strategy_id"], request["side"]):
+        order = resolve_mix_order(request, slack["thread_ts"])
     if not _terms_within_tolerance(confirmed, mix_order_terms(order)):
         raise MixOrderChangedError("수량 또는 호가가 바뀌었습니다. 주문 버튼을 다시 눌러 확인하세요.")
     claimed = _signals().update_one(

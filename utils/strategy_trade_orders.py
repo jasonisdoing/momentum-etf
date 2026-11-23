@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -36,6 +37,7 @@ from services.broker_trade_service import (
 )
 from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
 from utils.db_manager import get_db_connection
+from utils.logger import get_app_logger
 from utils.market_session import is_instrument_trading_time
 from utils.portfolio_io import return_pct_from_avg_price
 from utils.strategy_trade_config import round_buy_quantity
@@ -54,6 +56,7 @@ from utils.strategy_trade_service import load_strategy_view
 from utils.strategy_trade_signal_lock import order_limit_lock
 from utils.strategy_trade_threads import SIGNAL_RETENTION_DAYS
 
+logger = get_app_logger()
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_orders"
 # 신호 스레드 기록은 사고팔기 설정 문서의 `signal_threads` 목록에 둔다 — 완료하면 지우고, 날짜가 바뀌어도 이어 추적한다.
@@ -76,6 +79,30 @@ class RoundNotOrderableError(BrokerApiError):
     def __init__(self, message: str, *, done: bool) -> None:
         super().__init__(message)
         self.done = done
+
+
+class OrderPrecheckError(BrokerApiError):
+    """최초 주문 전송 전 검증 실패 — 접수 여부 불명과 구분한다."""
+
+
+@contextmanager
+def order_precheck(account_id: str, strategy_id: str, side: str):
+    """최초 주문 전 검증 구간만 표시한다. 주문 접수 이후에는 사용하지 않는다."""
+    try:
+        yield
+    except RoundNotOrderableError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "[BROKER-ORDER] stage=precheck account=%s strategy=%s side=%s order_sent=false error=%s",
+            account_id,
+            strategy_id,
+            side,
+            type(exc).__name__,
+        )
+        raise OrderPrecheckError(
+            f"주문 전 확인에 실패했습니다. 주문은 전송하지 않았습니다. 다시 시도해주세요. 상세: {exc}"
+        ) from exc
 
 
 _index_ready = False
@@ -462,11 +489,12 @@ def place_order(
         raise BrokerApiError("모달에서 직접 내는 주문은 매도만 됩니다 — 매수는 슬랙 주문 메시지로 내세요.")
     env = account_env(account_id)
     # 주문 직전이라 저장된 원장이 아니라 지금 증권사 기준으로 다시 계산한다.
-    order = resolve_order(account_id, pool, strategy_id, side, round_no, fresh=True, arbitrary_id=arbitrary_id)
-    _require_no_duplicate(account_id, strategy_id, side)
-    sign = 1 if side == "buy" else -1
-    _require_order_allowed(account_id, env, sign * order["price"] * order["quantity"], 1)
-    base = _record_base(env, account_id, pool, strategy_id, round_no, order, slack)
+    with order_precheck(account_id, strategy_id, side):
+        order = resolve_order(account_id, pool, strategy_id, side, round_no, fresh=True, arbitrary_id=arbitrary_id)
+        _require_no_duplicate(account_id, strategy_id, side)
+        sign = 1 if side == "buy" else -1
+        _require_order_allowed(account_id, env, sign * order["price"] * order["quantity"], 1)
+        base = _record_base(env, account_id, pool, strategy_id, round_no, order, slack)
     return {**submit_order_record(base, side, order["price"]), "signal_price": order["signal_price"]}
 
 
@@ -479,14 +507,15 @@ def place_swap(account_id: str, pool: str, strategy_id: str, round_no: int, slac
     from uuid import uuid4
 
     env = account_env(account_id)
-    order = resolve_swap(account_id, pool, strategy_id, round_no, fresh=True)
-    _require_no_duplicate(account_id, strategy_id, "sell")
-    _require_no_duplicate(account_id, strategy_id, "buy")
-    amount = order["buy_price"] * order["buy_quantity"] - order["sell_price"] * order["sell_quantity"]
-    _require_order_allowed(account_id, env, amount, 2)
-    base = _record_base(
-        env, account_id, pool, strategy_id, round_no, {**order, "quantity": order["sell_quantity"]}, slack
-    )
+    with order_precheck(account_id, strategy_id, "sell"):
+        order = resolve_swap(account_id, pool, strategy_id, round_no, fresh=True)
+        _require_no_duplicate(account_id, strategy_id, "sell")
+        _require_no_duplicate(account_id, strategy_id, "buy")
+        amount = order["buy_price"] * order["buy_quantity"] - order["sell_price"] * order["sell_quantity"]
+        _require_order_allowed(account_id, env, amount, 2)
+        base = _record_base(
+            env, account_id, pool, strategy_id, round_no, {**order, "quantity": order["sell_quantity"]}, slack
+        )
     base["pair_id"] = uuid4().hex
     sell = submit_order_record(base, "sell", order["sell_price"])
     try:
@@ -576,20 +605,34 @@ def submit_order_record(base: dict[str, Any], side: str, price: int | float) -> 
     with order_limit_lock(base["account_id"]):
         _check_order_allowed(base["account_id"], base["env"], amount, 1, rate)
         inserted = orders.insert_one(doc)
+    logger.info(
+        "[BROKER-ORDER] stage=submission outcome=started account=%s ticker=%s side=%s record_id=%s",
+        base["account_id"],
+        base["ticker"],
+        side,
+        inserted.inserted_id,
+    )
     try:
         placed = place_limit_order(base["account_id"], side, base["ticker"], base["quantity"], price, base["venue"])
     except OrderUncertainError as exc:
+        logger.warning("[BROKER-ORDER] stage=submission outcome=uncertain record_id=%s", inserted.inserted_id)
         # 주문이 들어갔는지 모른다 — 실패로 단정하지 않고 남겨 둔다(`refresh` 가 정리).
         orders.update_one(
             {"_id": inserted.inserted_id}, {"$set": {"message": str(exc), "updated_at": _now().isoformat()}}
         )
         raise
     except BrokerApiError as exc:
+        logger.warning(
+            "[BROKER-ORDER] stage=submission outcome=rejected record_id=%s error=%s",
+            inserted.inserted_id,
+            type(exc).__name__,
+        )
         orders.update_one(
             {"_id": inserted.inserted_id},
             {"$set": {"status": "rejected", "message": str(exc), "updated_at": _now().isoformat()}},
         )
         raise
+    logger.info("[BROKER-ORDER] stage=submission outcome=accepted record_id=%s", inserted.inserted_id)
     accepted_at = _now().isoformat()
     orders.update_one(
         {"_id": inserted.inserted_id},
