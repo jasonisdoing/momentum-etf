@@ -222,7 +222,8 @@ def trading_time_closed_message(country: str, instrument_kind: str, *, now: date
     remaining = _format_remaining(next_open - now.astimezone(zone))
     return (
         f"지금은 이 종목의 거래 시간이 아닙니다. "
-        f"(현재 {now_kst:%H:%M} KST · 거래 시간 {hours_text} · 다음 주문 가능 {next_kst:%m-%d %H:%M} KST, {remaining})"
+        f"(현재 {now_kst:%H:%M} KST · 거래 시간 {hours_text}) "
+        f"다음 주문 가능 시간은 {remaining}입니다({next_kst:%m-%d %H:%M} KST)"
     )
 
 

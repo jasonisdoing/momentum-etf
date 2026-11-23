@@ -16,7 +16,7 @@ import {
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
 import { StatusBadge } from "../components/StatusBadge";
-import { SlackSignalActionModal, SlackSignalBadge, type SlackSignalActionTarget } from "../components/SlackSignalControls";
+import { FormattedAlertMessage, SlackSignalActionModal, SlackSignalBadge, type SlackSignalActionTarget } from "../components/SlackSignalControls";
 import { SlackAlarmField } from "../components/SlackAlarmField";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
@@ -2022,7 +2022,11 @@ export function StrategyMixClient() {
             <dt>예상 수량</dt><dd>{selectedAction.item.quantity.toLocaleString()}주</dd>
           </dl>
           <p>실제 주문 가격과 수량은 Slack에서 최종 확인합니다.</p>
-          {sendActionError ? <p role="alert" className="text-danger mb-0">{sendActionError}</p> : null}
+          {sendActionError ? (
+            <p role="alert" className="mb-0">
+              <FormattedAlertMessage message={sendActionError} />
+            </p>
+          ) : null}
         </> : null}
       </AppModal>
       <SlackSignalActionModal

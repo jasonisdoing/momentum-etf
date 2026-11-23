@@ -8,6 +8,27 @@ import { AppModal } from "./AppModal";
 import { StatusBadge } from "./StatusBadge";
 import { useToast } from "./ToastProvider";
 
+/** 오류 문구 중 괄호 안은 기본(검정)색, 괄호 밖 문장은 빨간색으로 강조한다. */
+export function FormattedAlertMessage({ message }: { message: string }) {
+  const parts = message.split(/(\([^)]*\))/g);
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.startsWith("(") && part.endsWith(")") ? (
+          <span key={index} style={{ color: "var(--text-primary, #1f2937)" }}>
+            {part}
+          </span>
+        ) : (
+          <span key={index} className="text-danger">
+            {part}
+          </span>
+        ),
+      )}
+    </>
+  );
+}
+
+
 export function SlackSignalBadge({ label, compact, title = "눌러서 주문·정정·취소·회수", onClick }: {
   label: string;
   compact: boolean;
@@ -380,8 +401,8 @@ export function SlackSignalActionModal({ target, onClose, onChanged, onWithdrawn
               </p>
             </>
           ) : (
-            <p style={{ margin: 0, fontSize: "var(--fs-sm)" }} className="text-danger">
-              {state.order_error ?? "주문 가능 정보를 확인할 수 없습니다."}
+            <p style={{ margin: 0, fontSize: "var(--fs-sm)" }}>
+              <FormattedAlertMessage message={state.order_error ?? "주문 가능 정보를 확인할 수 없습니다."} />
             </p>
           )}
         </div>
@@ -433,8 +454,8 @@ export function SlackSignalActionModal({ target, onClose, onChanged, onWithdrawn
       ) : null}
 
       {error ? (
-        <p role="alert" className="text-danger mb-0" style={{ marginTop: 10, fontSize: "var(--fs-sm)" }}>
-          {error}
+        <p role="alert" className="mb-0" style={{ marginTop: 10, fontSize: "var(--fs-sm)" }}>
+          <FormattedAlertMessage message={error} />
         </p>
       ) : null}
     </AppModal>
