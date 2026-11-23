@@ -616,9 +616,10 @@ def submit_order_record(base: dict[str, Any], side: str, price: int | float) -> 
         placed = place_limit_order(base["account_id"], side, base["ticker"], base["quantity"], price, base["venue"])
     except OrderUncertainError as exc:
         logger.warning("[BROKER-ORDER] stage=submission outcome=uncertain record_id=%s", inserted.inserted_id)
-        # 주문이 들어갔는지 모른다 — 실패로 단정하지 않고 남겨 둔다(`refresh` 가 정리).
+        # 주문이 들어갔는지 모른다 — 실패로 단정하지 않고 남겨 둔다(`refresh` 가 대조·정리).
         orders.update_one(
-            {"_id": inserted.inserted_id}, {"$set": {"message": str(exc), "updated_at": _now().isoformat()}}
+            {"_id": inserted.inserted_id},
+            {"$set": {"uncertain": True, "message": str(exc), "updated_at": _now().isoformat()}},
         )
         raise
     except BrokerApiError as exc:
@@ -794,18 +795,45 @@ def refresh_account_orders(account_id: str) -> None:
             broker_rows[(order_day, row["order_no"])] = row
 
     now = _now()
+    assigned_order_nos: set[str] | None = None
     for record in active:
         update: dict[str, Any] = {}
         if not record.get("order_no"):
-            age = (now - datetime.fromisoformat(record["created_at"])).total_seconds()
-            if record.get("mix_action_key") is not None:
-                # 주문번호 없는 합성 주문은 증권사 접수 여부를 확인하기 전까지 중복을 막는다.
-                continue
-            if age > _SUBMIT_TIMEOUT_SECONDS:
-                update = {
-                    "status": "rejected",
-                    "message": "전송 결과를 확인하지 못했습니다 — 증권사 주문내역에서 직접 확인하세요.",
+            if assigned_order_nos is None:
+                assigned_order_nos = {
+                    str(r["order_no"])
+                    for r in orders.find({"account_id": account_id, "order_no": {"$ne": None}}, {"order_no": 1})
                 }
+            order_day = _order_date(record)
+            matched = next(
+                (
+                    row
+                    for (day_key, ono), row in broker_rows.items()
+                    if day_key == order_day
+                    and ono not in assigned_order_nos
+                    and row["ticker"] == record["ticker"]
+                    and row["side"] == record["side"]
+                    and int(row["quantity"]) == int(record["quantity"])
+                    and abs(float(row["price"]) - float(record["price"])) < 1e-6
+                ),
+                None,
+            )
+            if matched is not None:
+                assigned_order_nos.add(matched["order_no"])
+                update = {
+                    "order_no": matched["order_no"],
+                    "status": _broker_status(record, matched["status"]),
+                    "filled_quantity": matched["filled_quantity"],
+                    "average_fill_price": matched["average_fill_price"],
+                    "message": "",
+                }
+            else:
+                age = (now - datetime.fromisoformat(record["created_at"])).total_seconds()
+                if age > min(_SUBMIT_TIMEOUT_SECONDS, 15):
+                    update = {
+                        "status": "rejected",
+                        "message": "증권사 주문내역에서 접수된 주문이 확인되지 않았습니다.",
+                    }
         else:
             row = broker_rows.get((_order_date(record), record["order_no"]))
             if row is None:
@@ -845,6 +873,7 @@ def serialize_order(record: dict[str, Any]) -> dict[str, Any]:
         "arbitrary_id": record.get("arbitrary_id"),
         # 주문을 낸 거래소(국장 KRX·NXT, 미장 거래소 코드) — 슬랙 주문 메시지 제목에 붙는다.
         "venue": record["venue"],
+        "uncertain": bool(record.get("uncertain")),
     }
 
 
@@ -875,7 +904,7 @@ def finished_slack_orders() -> list[dict[str, Any]]:
             {
                 "slack": {"$ne": None},
                 "slack_notified": False,
-                "order_no": {"$ne": None},
+                "$or": [{"order_no": {"$ne": None}}, {"uncertain": True}],
                 "status": {"$in": list(FINISHED_STATUSES)},
             }
         )

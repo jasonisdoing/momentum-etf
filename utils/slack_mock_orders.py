@@ -697,7 +697,9 @@ def _finish(target: dict[str, Any], order: dict[str, Any]) -> None:
     if order["pair_id"] is not None:
         _update_message(target, _pair_blocks(request, order["pair_id"], text))
         return
-    if order["status"] == "canceled" and order["filled_quantity"] == 0:
+    if (order["status"] == "canceled" or (order["status"] == "rejected" and order.get("uncertain"))) and order[
+        "filled_quantity"
+    ] == 0:
         # 다시 주문해도 서버가 회차 보유 상태·중복·안전 장치를 처음 주문과 똑같이 검사한다.
         _update_message(target, [*_open_blocks(request, "다시 주문하기"), _note(text)])
         _release_reservation(target)
