@@ -531,7 +531,7 @@ def _require_current_signal(signal_ts: str, account_id: str, pool: str, strategy
     from utils.strategy_trade_threads import _messages, complete_signal_thread
 
     root = _messages().find_one({"thread_ts": signal_ts, "ts": signal_ts})
-    if root is None or root.get("withdrawal_text") or root.get("signal_completed"):
+    if root is None or root.get("withdrawal_text") or root.get("signal_completed") or root.get("signal_expired"):
         raise RoundNotOrderableError("이미 종료되었거나 확인할 수 없는 신호입니다.", done=True)
     strategy = _order_strategy(account_id, pool, strategy_id, fresh=False)
     fills = {row["round"]: row["fill_price"] for row in strategy["rounds"] if row["held"]}

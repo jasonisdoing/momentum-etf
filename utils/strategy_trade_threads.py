@@ -96,11 +96,11 @@ def reserve_signal_for_order(signal_ts: str, message_ts: str) -> bool:
     root = {"thread_ts": signal_ts, "ts": signal_ts}
     from utils.strategy_trade_orders import _orders
 
-    if (
-        _orders().find_one({"slack.thread_ts": signal_ts, "slack.message_ts": message_ts, "status": "filled"})
-        is not None
-    ):
-        if signal_is_manual(signal_ts):
+    terminal = _orders().find_one(
+        {"slack.thread_ts": signal_ts, "slack.message_ts": message_ts, "status": {"$in": ["filled", "expired"]}}
+    )
+    if terminal is not None:
+        if terminal["status"] == "filled" and signal_is_manual(signal_ts):
             complete_signal_thread(signal_ts)
         return False
     updated = _messages().update_one(
@@ -108,6 +108,7 @@ def reserve_signal_for_order(signal_ts: str, message_ts: str) -> bool:
             **root,
             "withdrawal_text": {"$exists": False},
             "signal_completed": {"$ne": True},
+            "signal_expired": {"$ne": True},
             "order_reserved": {"$ne": True},
         },
         {"$set": {"signal_used": True, "order_reserved": True}},
@@ -130,6 +131,14 @@ def complete_signal_thread(signal_ts: str) -> None:
     _messages().update_one(
         {"thread_ts": signal_ts, "ts": signal_ts},
         {"$set": {"signal_used": True, "signal_completed": True}, "$unset": {"expires_at": ""}},
+    )
+
+
+def expire_signal_thread(signal_ts: str) -> None:
+    """만료는 체결 완료와 구분한다. 메시지와 이력을 남기고 이전 스레드의 재주문만 막는다."""
+    _messages().update_one(
+        {"thread_ts": signal_ts, "ts": signal_ts},
+        {"$set": {"signal_used": True, "signal_expired": True}, "$unset": {"expires_at": ""}},
     )
 
 

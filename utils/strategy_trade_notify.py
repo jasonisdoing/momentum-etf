@@ -145,6 +145,45 @@ def _round_filled(pending: dict[str, Any], held_count: int, fills: dict[int, int
     return held_count >= round_no
 
 
+def _entry_expired(pending: dict[str, Any]) -> bool:
+    """만료된 주문 신호만 끝낸다. 미발주·취소·접수 불명·진행 중 주문은 보존한다."""
+    from utils.strategy_trade_orders import ACTIVE_STATUSES, _orders
+    from utils.strategy_trade_threads import _messages
+
+    root = pending.get("signal_ts")
+    if not root:
+        return False
+    if _messages().find_one({"thread_ts": root, "ts": root, "signal_expired": True}):
+        return True
+    query = {"slack.thread_ts": root, "round": pending["round"]}
+    if not pending.get("rebuy"):
+        query["side"] = pending["action"]
+    if pending.get("arbitrary_id") is not None:
+        query["arbitrary_id"] = pending["arbitrary_id"]
+    records = list(_orders().find(query))
+    return any(record["status"] == "expired" for record in records) and not any(
+        record["status"] in ACTIVE_STATUSES for record in records
+    )
+
+
+def retire_expired_signals(sent_log: _SentLog, target: tuple[str, str]) -> int:
+    """예약한 종목의 만료 신호만 활성 기록에서 빼고 원본 메시지·주문 이력은 보존한다."""
+    from utils.strategy_trade_threads import expire_signal_thread
+
+    keys = [
+        key
+        for key, entry in sent_log.items()
+        if (entry["account_id"], entry["ticker"]) == target and _entry_expired(entry)
+    ]
+    roots = {sent_log[key]["signal_ts"] for key in keys}
+    for key in keys:
+        del sent_log[key]
+    remaining = {entry.get("signal_ts") for entry in sent_log.values()}
+    for root in roots - remaining:
+        expire_signal_thread(root)
+    return len(keys)
+
+
 def _entry_filled(
     pending: dict[str, Any], held_count: int, fills: dict[int, int], events: list[dict[str, Any]]
 ) -> bool:
@@ -294,7 +333,7 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
         sid = entry.get("strategy_id")
         if sid not in held_counts or entry.get("session_closed"):
             continue
-        if _entry_filled(entry, held_counts[sid], held_fills[sid], events[sid]):
+        if _entry_expired(entry) or _entry_filled(entry, held_counts[sid], held_fills[sid], events[sid]):
             continue
         signal_ts = entry.get("signal_ts")
         slack_keys[(sid, entry["round"], entry["action"])] = {
@@ -788,6 +827,8 @@ def _notify_prepared_view(
     sent_log = _SentLog(
         {key: entry for key, entry in _load_sent_log().items() if (entry["account_id"], entry["ticker"]) == target}
     )
+    if retire_expired_signals(sent_log, target):
+        _save_sent_log(sent_log)
     current_settings = load_settings()
     enabled = {account_id for account_id, entry in current_settings["accounts"].items() if entry["slack_enabled"]}
     configured = set(current_settings["strategies"])
@@ -1025,6 +1066,8 @@ def _send_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("회차 가격·수량이 변경됐습니다. 확인창을 다시 열어 확인하세요.")
     key = _trigger_key(trigger)
     sent_log = _load_sent_log()
+    if retire_expired_signals(sent_log, (strategy["account_id"], strategy["ticker"])):
+        _save_sent_log(sent_log)
     previous = _matching_signal(sent_log, trigger)
     if previous is not None:
         held = strategy["status"]["held_count"]

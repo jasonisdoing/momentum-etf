@@ -302,6 +302,9 @@ class MixOrderTest(TestCase):
         with (
             patch.object(order_store, "_orders", return_value=self.orders),
             patch.object(order_store, "list_day_orders", return_value=[]),
+            patch.object(
+                order_store, "_now", return_value=datetime(2025, 1, 3, 10, 0, 5, tzinfo=ZoneInfo("Asia/Seoul"))
+            ),
         ):
             order_store.refresh_account_orders("a1")
         self.orders.update_one.assert_not_called()

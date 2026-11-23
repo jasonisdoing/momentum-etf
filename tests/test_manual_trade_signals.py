@@ -596,6 +596,132 @@ class ManualSignalsTest(TestCase):
         notify.notify_strategy_trade()
         self.assertEqual(self.sender.call_count, 1)
 
+    def test_expired_manual_signal_is_hidden_and_retired_without_fill_confirmation(self):
+        self.manual()
+        self.orders.insert_one(
+            {
+                "strategy_id": "s1",
+                "round": 1,
+                "side": "buy",
+                "status": "expired",
+                "filled_quantity": 0,
+                "slack": {"thread_ts": "1", "message_ts": "1"},
+            }
+        )
+        self.assertEqual(
+            notify.mark_sent_rounds({"strategies": [deepcopy(self.strategy)]})["strategies"][0]["rounds"][0][
+                "slack_signals"
+            ],
+            [],
+        )
+        # 장 시작 전에도 이미 만료된 신호는 정리한다. 새 주문·체결 확인 메시지는 보내지 않는다.
+        with patch.object(notify, "_can_notify", return_value=False):
+            notify.notify_strategy_trade()
+        self.assertFalse(self.sent)
+        self.sender.assert_called_once()
+        root = self.messages.find_one({"thread_ts": "1", "ts": "1"})
+        self.assertTrue(root["signal_expired"])
+        self.assertNotIn("signal_completed", root)
+        self.assertEqual(len(root["signal_entries"]), 1)
+        self.assertEqual(self.orders.docs[0]["status"], "expired")
+        self.assertFalse(threads.reserve_signal_for_order("1", "1"))
+        with self.assertRaises(orders.RoundNotOrderableError):
+            orders._require_current_signal("1", "a1", "test", "s1", 1)
+
+    def test_expired_signal_allows_fresh_manual_signal_before_batch_cleanup(self):
+        self.manual()
+        self.orders.insert_one(
+            {
+                "strategy_id": "s1",
+                "round": 1,
+                "side": "buy",
+                "status": "expired",
+                "filled_quantity": 0,
+                "slack": {"thread_ts": "1", "message_ts": "1"},
+            }
+        )
+        self.assertFalse(threads.reserve_signal_for_order("1", "1"))
+        self.assertTrue(self.manual()["sent"])
+        self.assertEqual(self.sent["s1:1-buy"]["signal_ts"], "2")
+        self.assertTrue(self.messages.find_one({"thread_ts": "1"})["signal_expired"])
+        self.assertTrue(threads.reserve_signal_for_order("2", "2"))
+        self.assertFalse(threads.reserve_signal_for_order("1", "1"))
+
+    def test_partially_filled_expired_sell_requires_current_remaining_quantity(self):
+        self.strategy["status"]["held_count"] = 1
+        self.strategy["rounds"][0].update(
+            held=True, is_next=False, fill_price=100, sell_limit=108, sell_index=108, profit_pct=0
+        )
+        self.payload["side"] = "sell"
+        self.manual()
+        self.orders.insert_one(
+            {
+                "strategy_id": "s1",
+                "round": 1,
+                "side": "sell",
+                "status": "expired",
+                "filled_quantity": 4,
+                "slack": {"thread_ts": "1", "message_ts": "1"},
+            }
+        )
+        old_preview = notify.preview_manual_signal(self.payload)
+        self.strategy["rounds"][0]["quantity"] = 6
+        with self.assertRaisesRegex(ValueError, "변경"):
+            notify.send_manual_signal(old_preview)
+        self.assertTrue(self.manual()["sent"])
+        self.assertEqual(self.sent["s1:1-sell"]["quantity"], 6)
+        self.assertEqual(self.sent["s1:1-sell"]["signal_ts"], "2")
+        self.assertFalse(threads.reserve_signal_for_order("1", "1"))
+        self.assertEqual(self.orders.docs[0]["filled_quantity"], 4)
+
+    def test_inflight_pair_and_unsubmitted_manual_signals_are_not_retired(self):
+        self.manual()
+        self.assertEqual(notify.retire_expired_signals(self.sent, ("a1", "ETF")), 0)
+        self.sent["s1:1-buy"]["rebuy"] = True
+        self.orders.insert_one(
+            {
+                "strategy_id": "s1",
+                "round": 1,
+                "side": "sell",
+                "status": "expired",
+                "filled_quantity": 0,
+                "slack": {"thread_ts": "1", "message_ts": "1"},
+            }
+        )
+        self.orders.insert_one(
+            {
+                "strategy_id": "s1",
+                "round": 1,
+                "side": "buy",
+                "status": "submitting",
+                "filled_quantity": 0,
+                "slack": {"thread_ts": "1", "message_ts": "1"},
+            }
+        )
+        self.assertEqual(notify.retire_expired_signals(self.sent, ("a1", "ETF")), 0)
+        self.assertIn("s1:1-buy", self.sent)
+
+    def test_expiring_one_message_keeps_other_message_in_shared_thread_open(self):
+        self.manual()
+        self.messages.docs[0]["signal_entries"][0]["origin"] = "auto"
+        other = {**deepcopy(self.sent["s1:1-buy"]), "round": 2, "action": "sell", "origin": "auto"}
+        self.sent["s1:2-sell"] = other
+        self.orders.insert_one(
+            {
+                "strategy_id": "s1",
+                "round": 1,
+                "side": "buy",
+                "status": "expired",
+                "filled_quantity": 0,
+                "slack": {"thread_ts": "1", "message_ts": "expired"},
+            }
+        )
+        self.assertEqual(notify.retire_expired_signals(self.sent, ("a1", "ETF")), 1)
+        self.assertEqual(set(self.sent), {"s1:2-sell"})
+        self.assertNotIn("signal_expired", self.messages.find_one({"thread_ts": "1"}))
+        self.assertFalse(threads.reserve_signal_for_order("1", "expired"))
+        self.assertTrue(threads.reserve_signal_for_order("1", "other"))
+
     def test_partial_fill_not_complete(self):
         self.manual()
         self.orders.insert_one(
