@@ -38,7 +38,7 @@ from services.broker_trade_service import (
 from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
-from utils.market_session import is_instrument_trading_time
+from utils.market_session import is_instrument_trading_time, trading_time_closed_message
 from utils.portfolio_io import return_pct_from_avg_price
 from utils.strategy_trade_config import round_buy_quantity
 from utils.strategy_trade_ledger import REGULAR_SELL, SOURCE_API, SOURCE_AUTO, is_buy
@@ -399,7 +399,7 @@ def _buy_quantity(strategy: dict[str, Any], price: int, account_id: str, rate: f
 def require_order_session(instrument: dict[str, Any], *, now: datetime) -> None:
     """수동 신호 발송과 주문 확인은 종목별 공통 거래 시간을 따른다."""
     if not is_instrument_trading_time(instrument["country"], instrument["instrument_kind"], now=now):
-        raise BrokerApiError("지금은 이 종목의 거래 시간이 아닙니다.")
+        raise BrokerApiError(trading_time_closed_message(instrument["country"], instrument["instrument_kind"], now=now))
 
 
 def _order_venue(strategy: dict[str, Any], *, now: datetime) -> str:

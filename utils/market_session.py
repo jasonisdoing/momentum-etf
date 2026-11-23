@@ -11,11 +11,14 @@
 
 from __future__ import annotations
 
+import math
 from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from config import INSTRUMENT_TRADING_WINDOWS, KOR_KRX_ORDER_WINDOWS, KOR_VENUE_OPEN_WINDOWS, MARKET_SCHEDULES
+
+_KST = ZoneInfo("Asia/Seoul")
 
 # 세션 코드 — 화면 문구는 프론트가 정한다(여기서는 상태만 준다).
 PREMARKET = "premarket"
@@ -145,13 +148,91 @@ VENUE_KRX = "KRX"
 VENUE_NXT = "NXT"
 
 
+def _format_remaining(delta: timedelta) -> str:
+    total_minutes = max(1, math.ceil(delta.total_seconds() / 60))
+    days, rem = divmod(total_minutes, 1440)
+    hours, minutes = divmod(rem, 60)
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days}일")
+    if hours:
+        parts.append(f"{hours}시간")
+    if minutes or not parts:
+        parts.append(f"{minutes}분")
+    return " ".join(parts) + " 후"
+
+
+def _next_instrument_open(country: str, instrument_kind: str, *, now: datetime) -> datetime | None:
+    market = str(country or "").strip().lower()
+    schedule = _schedule(market)
+    zone = ZoneInfo(str(schedule["timezone"]))
+    now_local = now.astimezone(zone)
+    windows = INSTRUMENT_TRADING_WINDOWS[market][instrument_kind]
+    has_daymarket = market == "us" and schedule.get("daymarket_open") and schedule.get("daymarket_close")
+
+    for offset in range(15):
+        day = now_local.date() + timedelta(days=offset)
+        opens: list[datetime] = []
+        if _is_trading_day(market, day):
+            if has_daymarket:
+                opens.append(_at(zone, day, time(0, 0)))
+            for start, _ in windows:
+                opens.append(_at(zone, day, start))
+        if has_daymarket and _is_trading_day(market, day + timedelta(days=1)):
+            opens.append(_at(zone, day, schedule["daymarket_open"]))
+        future = [dt for dt in opens if dt > now_local]
+        if future:
+            return min(future)
+    return None
+
+
+def _trading_hours_text(country: str, instrument_kind: str, *, ref_local: datetime) -> str:
+    market = str(country or "").strip().lower()
+    schedule = _schedule(market)
+    zone = ZoneInfo(str(schedule["timezone"]))
+    windows = INSTRUMENT_TRADING_WINDOWS[market][instrument_kind]
+    base_day = ref_local.date()
+
+    def _kst_span(start_dt: datetime, end_dt: datetime) -> str:
+        s_kst = start_dt.astimezone(_KST)
+        e_kst = end_dt.astimezone(_KST)
+        end_prefix = "익일 " if e_kst.date() > s_kst.date() else ""
+        return f"{s_kst:%H:%M}~{end_prefix}{e_kst:%H:%M}"
+
+    spans = [_kst_span(_at(zone, base_day, start), _at(zone, base_day, end)) for start, end in windows]
+    if market == "us" and schedule.get("daymarket_open") and schedule.get("daymarket_close"):
+        day_start = _at(zone, base_day, schedule["daymarket_open"])
+        day_end = _at(zone, base_day + timedelta(days=1), schedule["daymarket_close"])
+        spans.append(_kst_span(day_start, day_end))
+    return ", ".join(spans) + " KST"
+
+
+def trading_time_closed_message(country: str, instrument_kind: str, *, now: datetime) -> str:
+    """거래 시간 외 안내 메시지 — 현재 시각·거래 시간·다음 주문 가능 시각과 남은 시간을 함께 알린다."""
+    market = str(country or "").strip().lower()
+    schedule = _schedule(market)
+    zone = ZoneInfo(str(schedule["timezone"]))
+    now_kst = now.astimezone(_KST)
+    next_open = _next_instrument_open(market, instrument_kind, now=now)
+    ref_local = next_open.astimezone(zone) if next_open else now.astimezone(zone)
+    hours_text = _trading_hours_text(market, instrument_kind, ref_local=ref_local)
+    if next_open is None:
+        return f"지금은 이 종목의 거래 시간이 아닙니다. (현재 {now_kst:%H:%M} KST · 거래 시간 {hours_text})"
+    next_kst = next_open.astimezone(_KST)
+    remaining = _format_remaining(next_open - now.astimezone(zone))
+    return (
+        f"지금은 이 종목의 거래 시간이 아닙니다. "
+        f"(현재 {now_kst:%H:%M} KST · 거래 시간 {hours_text} · 다음 주문 가능 {next_kst:%m-%d %H:%M} KST, {remaining})"
+    )
+
+
 def kor_order_venue(instrument_kind: str, *, now: datetime) -> str:
     """지금 국장 종목에 주문을 낼 거래소 — KRX 주문 구간(`KOR_KRX_ORDER_WINDOWS`)이면 KRX, 그 밖 개별주 거래 시간이면 NXT.
 
     그 종목 종류의 거래 시간 밖이면 낼 곳이 없어 ValueError 다(ETF 는 정규장만).
     """
     if not is_instrument_trading_time("kor", instrument_kind, now=now):
-        raise ValueError("지금은 이 종목의 거래 시간이 아닙니다.")
+        raise ValueError(trading_time_closed_message("kor", instrument_kind, now=now))
     return VENUE_KRX if is_krx_order_time(instrument_kind, now=now) else VENUE_NXT
 
 

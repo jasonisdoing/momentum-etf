@@ -15,6 +15,7 @@ from utils.market_session import (
     is_instrument_trading_time,
     is_kor_venue_open,
     kor_order_venue,
+    trading_time_closed_message,
 )
 
 #: 국장 거래소별 마감 경고 구간 — 이 시각부터 그 거래소 마감까지 아직 체결되지 않은 슬랙 주문을 한 번 경고한다.
@@ -80,7 +81,7 @@ def order_venue(country: str, kind: str, exchange: str | None, *, now: datetime)
     if not exchange:
         raise ValueError("이 종목의 거래소가 저장돼 있지 않습니다 — 전략을 다시 저장하세요.")
     if not is_instrument_trading_time(country, kind, now=now):
-        raise ValueError("지금은 이 종목의 거래 시간이 아닙니다.")
+        raise ValueError(trading_time_closed_message(country, kind, now=now))
     return exchange
 
 
