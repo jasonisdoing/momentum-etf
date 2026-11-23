@@ -294,9 +294,18 @@ def _forget_replies(signal_ts: str) -> None:
     _config().update_one({"_id": _SETTINGS_KEY}, {"$pull": {"signal_threads": {"thread_ts": signal_ts}}})
 
 
-@signal_lock()
 def withdraw_signal_by_key(key: str) -> dict[str, Any]:
     """화면에서 발송 기록 한 건(`key`)의 신호를 회수한다 — 같은 메시지로 나간 발송 기록도 함께 지운다."""
+    from utils.strategy_trade_notify import _load_sent_log
+
+    entry = _load_sent_log().get(key)
+    if entry is None:
+        raise ValueError("이미 정리된 신호입니다.")
+    with signal_lock(entry["account_id"], entry["ticker"]):
+        return _withdraw_signal_by_key(key)
+
+
+def _withdraw_signal_by_key(key: str) -> dict[str, Any]:
     from utils.strategy_trade_notify import _load_sent_log, _save_sent_log
 
     sent_log = _load_sent_log()

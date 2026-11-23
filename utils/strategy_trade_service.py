@@ -41,7 +41,7 @@ from utils.strategy_trade_ledger import (
     trade_pairs,
 )
 from utils.strategy_trade_market import krw_rate
-from utils.strategy_trade_signal_lock import signal_lock
+from utils.strategy_trade_signal_lock import settings_signal_lock, signal_lock
 
 KST = ZoneInfo("Asia/Seoul")
 _CONFIG_COLLECTION = "system_config"
@@ -266,9 +266,26 @@ def _normalize_trade_groups(groups: Any) -> list[dict[str, str | None]]:
     return result
 
 
-@signal_lock()
 def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, groups: Any = None) -> None:
     """계좌의 슬랙 설정과 전략 목록을 검증한 뒤 한 번에 저장한다."""
+    from contextlib import ExitStack
+
+    with settings_signal_lock(account_id):
+        current = load_settings()["strategies"]
+        tickers = {entry["ticker"] for entry in current.values() if entry["account_id"] == account_id}
+        if isinstance(strategies, list):
+            tickers.update(
+                row["ticker"].strip().upper()
+                for row in strategies
+                if isinstance(row, dict) and isinstance(row.get("ticker"), str) and row["ticker"].strip()
+            )
+        with ExitStack() as stack:
+            for ticker in sorted(tickers):
+                stack.enter_context(signal_lock(account_id, ticker))
+            _save_account_trade(account_id, slack_enabled, strategies, groups)
+
+
+def _save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, groups: Any) -> None:
     from uuid import uuid4
 
     account = next((item for item in _trade_account_docs() if item["account_id"] == account_id), None)

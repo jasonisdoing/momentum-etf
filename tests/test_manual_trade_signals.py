@@ -16,6 +16,8 @@ from utils import strategy_trade_threads as threads
 from utils.strategy_trade_ledger import _day_trades
 
 _REAL_SEND_ORDER_MESSAGES = slack.send_signal_order_messages
+_REAL_LOAD_SENT_LOG = notify._load_sent_log
+_REAL_SAVE_SENT_LOG = notify._save_sent_log
 _REAL_CLOSE_THREADS = slack.close_session_threads
 _REAL_SEND_THREAD_MESSAGE = threads.send_thread_message
 
@@ -46,6 +48,8 @@ class MemoryCollection:
                         return False
                     if op == "$exists" and (value is not None) != target:
                         return False
+                    if op == "$gte" and (value is None or value < target):
+                        return False
                     if op == "$gt" and (value is None or value <= target):
                         return False
                     if op == "$lt" and (value is None or value >= target):
@@ -68,7 +72,11 @@ class MemoryCollection:
         with self.lock:
             if "_id" in doc and any(d.get("_id") == doc["_id"] for d in self.docs):
                 raise DuplicateKeyError("중복")
+            from bson import ObjectId
+
+            doc.setdefault("_id", ObjectId())
             self.docs.append(deepcopy(doc))
+            return SimpleNamespace(inserted_id=doc["_id"])
 
     def delete_one(self, query):
         with self.lock:
@@ -78,15 +86,30 @@ class MemoryCollection:
             del self.docs[index]
             return SimpleNamespace(deleted_count=1)
 
-    def update_one(self, query, update):
+    def update_one(self, query, update, upsert=False):
         with self.lock:
             for doc in self.docs:
                 if self.matches(doc, query):
-                    doc.update(deepcopy(update.get("$set", {})))
-                    for key in update.get("$unset", {}):
-                        doc.pop(key, None)
+                    self.apply_update(doc, update)
                     return SimpleNamespace(matched_count=1)
+            if upsert:
+                doc = deepcopy(query)
+                self.apply_update(doc, update)
+                self.docs.append(doc)
         return SimpleNamespace(matched_count=0)
+
+    @staticmethod
+    def apply_update(doc, update):
+        for operator, changes in update.items():
+            for key, value in changes.items():
+                node = doc
+                parts = key.split(".")
+                for part in parts[:-1]:
+                    node = node.setdefault(part, {})
+                if operator == "$set":
+                    node[parts[-1]] = deepcopy(value)
+                elif operator == "$unset":
+                    node.pop(parts[-1], None)
 
 
 class ManualSignalsTest(TestCase):
@@ -143,7 +166,7 @@ class ManualSignalsTest(TestCase):
                 notify,
                 "load_settings",
                 return_value={
-                    "strategies": {"s1": {"account_id": "a1", "pool": "test"}},
+                    "strategies": {"s1": {"account_id": "a1", "pool": "test", "ticker": "ETF"}},
                     "accounts": {"a1": {"slack_enabled": True}},
                 },
             ),
@@ -185,7 +208,14 @@ class ManualSignalsTest(TestCase):
             self.addCleanup(p.stop)
 
     def save(self, value):
-        self.sent = deepcopy(value)
+        if isinstance(value, notify._SentLog):
+            for key in value.saved:
+                if key not in value:
+                    self.sent.pop(key, None)
+            self.sent.update(deepcopy(value))
+            value.saved = deepcopy(dict(value))
+        else:
+            self.sent = deepcopy(value)
 
     def send(self, *args, **kwargs):
         ts = str(len(self.messages.docs) + 1)
@@ -280,12 +310,227 @@ class ManualSignalsTest(TestCase):
     def test_lock_timeout_does_not_retry_sending(self):
         from utils import strategy_trade_signal_lock as locking
 
-        with locking.signal_lock():
+        with locking.signal_lock("a1", "ETF"):
             # 대기 한도를 넘긴 시각을 바로 돌려줘 실제로 기다리지 않는다.
             with patch.object(locking, "monotonic", side_effect=[0, locking._LOCK_WAIT_SECONDS + 1]):
-                with self.assertRaisesRegex(ValueError, "다른 신호 작업"):
+                with self.assertRaisesRegex(locking.SignalBusyError, "신호 작업"):
                     self.manual()
         self.sender.assert_not_called()
+
+    def test_slow_slack_for_one_ticker_does_not_block_other_ticker_or_lose_records(self):
+        entered, release = Event(), Event()
+        failures = []
+        original = self.sender.side_effect
+
+        def slow_send(*args, **kwargs):
+            if not entered.is_set():
+                entered.set()
+                if not release.wait(5):
+                    raise AssertionError("대기 시간 초과")
+            return original(*args, **kwargs)
+
+        def worker():
+            try:
+                notify.notify_strategy_trade()
+            except Exception as exc:
+                failures.append(exc)
+
+        self.sender.side_effect = slow_send
+        with (
+            patch("utils.db_manager.get_db_connection", return_value={"system_config": self.config}),
+            patch.object(notify, "_load_sent_log", _REAL_LOAD_SENT_LOG),
+            patch.object(notify, "_save_sent_log", _REAL_SAVE_SENT_LOG),
+        ):
+            batch = Thread(target=worker)
+            batch.start()
+            try:
+                self.assertTrue(entered.wait(5))
+                self.strategy = {**deepcopy(self.strategy), "strategy_id": "s2", "ticker": "ETF2"}
+                self.strategy["rounds"][0]["ticker"] = "ETF2"
+                notify.load_settings.return_value["strategies"]["s2"] = {
+                    "account_id": "a1",
+                    "pool": "test",
+                    "ticker": "ETF2",
+                }
+                self.payload["strategy_id"] = "s2"
+                self.assertTrue(self.manual()["sent"])
+            finally:
+                release.set()
+                batch.join(5)
+            self.assertFalse(batch.is_alive())
+            self.assertFalse(failures)
+            sent = _REAL_LOAD_SENT_LOG()
+            self.assertEqual(set(sent), {"s1:1-buy", "s2:1-buy"})
+            self.assertTrue(all(entry["signal_ts"] for entry in sent.values()))
+        self.assertEqual(self.sender.call_count, 2)
+
+    def test_batch_skips_busy_ticker_and_continues_with_other_ticker(self):
+        from utils import strategy_trade_signal_lock as locking
+
+        second = {**deepcopy(self.strategy), "strategy_id": "s2", "ticker": "ETF2"}
+        second["rounds"][0]["ticker"] = "ETF2"
+        notify.load_settings.return_value["strategies"]["s2"] = {"account_id": "a1", "pool": "test", "ticker": "ETF2"}
+        with (
+            locking.signal_lock("a1", "ETF"),
+            patch.object(
+                notify, "load_views_where", return_value={"strategies": [self.strategy, second], "errors": {}}
+            ),
+        ):
+            result = notify.notify_strategy_trade()
+        self.assertTrue(result["sent"])
+        self.assertIn("다음 배치", result["reason"])
+        self.assertEqual([entry["strategy_id"] for entry in result["triggers"]], ["s2"])
+        self.assertEqual(self.sender.call_count, 1)
+        previous_second = self.sent["s2:1-buy"]["signal_ts"]
+        with patch.object(
+            notify, "load_views_where", return_value={"strategies": [self.strategy, second], "errors": {}}
+        ):
+            self.assertTrue(notify.notify_strategy_trade()["sent"])
+        self.assertEqual(set(self.sent), {"s1:1-buy", "s2:1-buy"})
+        self.assertEqual(self.sent["s2:1-buy"]["signal_ts"], previous_second)
+        self.assertEqual(self.sender.call_count, 2)
+
+    def test_slow_withdrawal_does_not_block_other_ticker_or_delete_its_signal(self):
+        entered, release = Event(), Event()
+        failures = []
+
+        def slow_withdrawal(*args):
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError("대기 시간 초과")
+
+        def worker():
+            try:
+                threads.withdraw_signal_by_key("s1:1-buy")
+            except Exception as exc:
+                failures.append(exc)
+
+        with (
+            patch("utils.db_manager.get_db_connection", return_value={"system_config": self.config}),
+            patch.object(notify, "_load_sent_log", _REAL_LOAD_SENT_LOG),
+            patch.object(notify, "_save_sent_log", _REAL_SAVE_SENT_LOG),
+            patch.object(threads, "resume_withdrawal", side_effect=slow_withdrawal),
+        ):
+            self.manual()
+            withdrawal = Thread(target=worker)
+            withdrawal.start()
+            try:
+                self.assertTrue(entered.wait(5))
+                self.strategy = {**deepcopy(self.strategy), "strategy_id": "s2", "ticker": "ETF2"}
+                self.strategy["rounds"][0]["ticker"] = "ETF2"
+                notify.load_settings.return_value["strategies"]["s2"] = {
+                    "account_id": "a1",
+                    "pool": "test",
+                    "ticker": "ETF2",
+                }
+                self.payload["strategy_id"] = "s2"
+                self.assertTrue(self.manual()["sent"])
+            finally:
+                release.set()
+                withdrawal.join(5)
+            self.assertFalse(withdrawal.is_alive())
+            self.assertFalse(failures)
+            self.assertEqual(set(_REAL_LOAD_SENT_LOG()), {"s2:1-buy"})
+            self.assertFalse(threads.reserve_signal_for_order("1", "1"))
+
+    def test_atomic_log_save_preserves_other_ticker_changes_and_deletions(self):
+        with patch("utils.db_manager.get_db_connection", return_value={"system_config": self.config}):
+            first, second = notify._SentLog({}), notify._SentLog({})
+            first["s1:1-buy"] = {"ticker": "ETF"}
+            second["s2:1-buy"] = {"ticker": "ETF2"}
+            _REAL_SAVE_SENT_LOG(first)
+            _REAL_SAVE_SENT_LOG(second)
+            deleting, updating = _REAL_LOAD_SENT_LOG(), _REAL_LOAD_SENT_LOG()
+            del deleting["s1:1-buy"]
+            updating["s2:1-buy"]["signal_ts"] = "new"
+            _REAL_SAVE_SENT_LOG(updating)
+            _REAL_SAVE_SENT_LOG(deleting)
+            self.assertEqual(dict(_REAL_LOAD_SENT_LOG()), {"s2:1-buy": {"ticker": "ETF2", "signal_ts": "new"}})
+
+    def test_concurrent_tickers_cannot_exceed_account_order_limit(self):
+        from services.broker_api_service import BrokerApiError
+
+        entered, release = Event(), Event()
+        failures = []
+        base = {
+            "account_id": "a1",
+            "env": "live",
+            "ticker": "ETF",
+            "quantity": 1,
+            "strategy_label": "종목",
+            "venue": "KRX",
+        }
+
+        def slow_broker(*args):
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError("대기 시간 초과")
+            return {"order_no": "1", "message": ""}
+
+        def worker():
+            try:
+                orders.submit_order_record(base, "buy", 100)
+            except Exception as exc:
+                failures.append(exc)
+
+        with (
+            patch.object(
+                orders,
+                "load_account_docs",
+                return_value=[
+                    {
+                        "account_id": "a1",
+                        "api_order_enabled": True,
+                        "api_order_max_count": 1,
+                        "api_order_max_amount": 1000,
+                    }
+                ],
+            ),
+            patch.object(orders, "account_country", return_value="kor"),
+            patch.object(orders, "krw_rate", return_value=1),
+            patch.object(orders, "_order_venue", return_value="KRX"),
+            patch.object(orders, "serialize_order", side_effect=lambda value: value),
+            patch.object(orders, "place_limit_order", side_effect=slow_broker) as broker,
+        ):
+            first = Thread(target=worker)
+            first.start()
+            try:
+                self.assertTrue(entered.wait(5))
+                with self.assertRaisesRegex(BrokerApiError, "주문 건수 한도"):
+                    orders.submit_order_record({**base, "ticker": "ETF2"}, "buy", 100)
+                self.assertEqual(broker.call_count, 1)
+            finally:
+                release.set()
+                first.join(5)
+        self.assertFalse(first.is_alive())
+        self.assertFalse(failures)
+        self.assertEqual(len(self.orders.docs), 1)
+
+    def test_live_reservation_renews_and_is_not_stolen_after_created_at_is_old(self):
+        from datetime import UTC, timedelta
+
+        from utils import strategy_trade_signal_lock as locking
+
+        renewed = Event()
+        update = self.config.update_one
+
+        def observe_update(*args, **kwargs):
+            result = update(*args, **kwargs)
+            renewed.set()
+            return result
+
+        with (
+            patch.object(locking, "_LOCK_RENEW_SECONDS", 0.01),
+            patch.object(self.config, "update_one", side_effect=observe_update),
+            locking.signal_lock("a1", "ETF"),
+        ):
+            key = locking._signal_key("a1", "ETF")
+            update({"_id": key}, {"$set": {"created_at": datetime.now(UTC) - timedelta(seconds=121)}})
+            self.assertTrue(renewed.wait(2))
+            with self.assertRaises(locking.SignalBusyError):
+                with locking.batch_signal_lock("a1", "ETF"):
+                    self.fail("실행 중인 예약을 빼앗았습니다.")
+        self.assertIsNone(self.config.find_one({"_id": key}))
 
     def test_next_day_price_return_and_settings_keep_manual(self):
         self.manual()
@@ -293,7 +538,9 @@ class ManualSignalsTest(TestCase):
         self.strategy["rounds"][0]["buy_reached"] = False
         tomorrow = datetime(2030, 1, 2, 20, tzinfo=notify.KST)
         with patch.object(notify, "_session_closed", return_value=True):
-            self.assertEqual(notify._settle_unused_signals([self.strategy], self.sent, tomorrow, {"s1"}), (0, 0))
+            self.assertEqual(
+                notify._settle_unused_signals([self.strategy], self.sent, tomorrow, {"s1"}, ("a1", "ETF")), (0, 0)
+            )
             self.assertFalse(notify._close_sessions([self.strategy], self.sent, tomorrow, {"s1"}))
             self.assertFalse(notify._drop_closed_session_signals(self.sent, {"s1"}))
         self.assertFalse(threads.withdraw_signal("1", "settings_changed", "간격 변경"))

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -18,7 +19,7 @@ from utils.market_session import is_instrument_trading_time
 from utils.order_confirm import build_confirm_line, pop_filled
 from utils.strategy_trade_market import format_level, format_money
 from utils.strategy_trade_service import load_settings, load_views_where, refresh_all_ledgers
-from utils.strategy_trade_signal_lock import signal_lock
+from utils.strategy_trade_signal_lock import SignalBusyError, batch_signal_lock, signal_lock
 
 KST = ZoneInfo("Asia/Seoul")
 logger = get_app_logger()
@@ -26,31 +27,44 @@ _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "strategy_trade_settings"
 
 
-def _load_sent_log() -> dict[str, dict[str, Any]]:
+class _SentLog(dict):
+    """조회한 원본과 비교해 이 작업에서 바꾼 항목만 저장한다."""
+
+    def __init__(self, entries):
+        super().__init__(entries)
+        self.saved = deepcopy(entries)
+
+
+def _load_sent_log() -> _SentLog:
     from utils.db_manager import get_db_connection
 
     db = get_db_connection()
     if db is None:
-        return {}
+        return _SentLog({})
     doc = db[_CONFIG_COLLECTION].find_one({"_id": _SETTINGS_KEY}) or {}
     stored = doc.get("sent_log")
     if not isinstance(stored, dict):
-        return {}
+        return _SentLog({})
     # 옛 형식(값이 날짜 문자열)은 확인 판정에 쓸 티커가 없어 버린다 — 하루면 자연히 정리된다.
-    return {str(k): v for k, v in stored.items() if isinstance(v, dict)}
+    return _SentLog({str(k): v for k, v in stored.items() if isinstance(v, dict)})
 
 
-def _save_sent_log(sent_log: dict[str, dict[str, Any]]) -> None:
+def _save_sent_log(sent_log: _SentLog) -> None:
+    """다른 종목이 동시에 저장해도 그 발송 기록을 덮어쓰지 않는다."""
     from utils.db_manager import get_db_connection
 
+    changed = {f"sent_log.{key}": value for key, value in sent_log.items() if sent_log.saved.get(key) != value}
+    removed = {f"sent_log.{key}": "" for key in sent_log.saved if key not in sent_log}
+    if not changed and not removed:
+        return
     db = get_db_connection()
     if db is None:
         raise RuntimeError("DB 연결에 실패했습니다.")
-    db[_CONFIG_COLLECTION].update_one(
-        {"_id": _SETTINGS_KEY},
-        {"$set": {"sent_log": sent_log, "sent_log_updated_at": datetime.now(KST).isoformat()}},
-        upsert=True,
-    )
+    update = {"$set": {**changed, "sent_log_updated_at": datetime.now(KST).isoformat()}}
+    if removed:
+        update["$unset"] = removed
+    db[_CONFIG_COLLECTION].update_one({"_id": _SETTINGS_KEY}, update, upsert=True)
+    sent_log.saved = deepcopy(dict(sent_log))
 
 
 _WITHDRAWAL_GAP_FRACTION = 0.20
@@ -600,7 +614,11 @@ def _price_returned(entries: list[dict[str, Any]], strategy: dict[str, Any]) -> 
 
 
 def _settle_unused_signals(
-    strategies: list[dict[str, Any]], sent_log: dict[str, dict[str, Any]], now: datetime, configured: set[str]
+    strategies: list[dict[str, Any]],
+    sent_log: dict[str, dict[str, Any]],
+    now: datetime,
+    configured: set[str],
+    target: tuple[str, str],
 ) -> tuple[int, int]:
     """미사용 신호를 회수한다 — 사고팔기에서 빠진 전략은 바로, 장중에는 가격이 되돌아오면, 마감 후에는 모두.
 
@@ -619,6 +637,11 @@ def _settle_unused_signals(
     expired = set()
     withdrawn = set()
     for thread in open_signal_threads(active_roots):
+        if not any(
+            entry["strategy_id"] != "mix" and (entry["account_id"], entry["ticker"]) == target
+            for entry in thread["signal_entries"]
+        ):
+            continue
         root = thread["thread_ts"]
         if thread.get("withdrawal_text"):
             withdrawn.add(root)
@@ -720,17 +743,51 @@ def notify_strategy_trade() -> dict[str, Any]:
 
     settings_at_read = load_settings()
     view = load_views_where(lambda entry: True, fresh=False)
-    with signal_lock():
-        return _notify_prepared_view(view, settings_at_read, snapshot_at)
+    from utils.strategy_trade_threads import open_signal_threads
+
+    targets = {(s["account_id"], s["ticker"]) for s in view["strategies"]}
+    entries = [*_load_sent_log().values()]
+    entries.extend(
+        entry
+        for thread in open_signal_threads(set())
+        for entry in thread["signal_entries"]
+        if entry["strategy_id"] != "mix"
+    )
+    targets.update((entry["account_id"], entry["ticker"]) for entry in entries)
+    results, busy = [], 0
+    for account_id, ticker in sorted(targets):
+        try:
+            with batch_signal_lock(account_id, ticker):
+                result = _notify_prepared_view(view, settings_at_read, snapshot_at, (account_id, ticker))
+                results.append(result)
+        except SignalBusyError:
+            busy += 1
+            logger.info("사고팔기 알림 연기 — 예약 중인 종목: %s · %s", account_id, ticker)
+    reasons = list(dict.fromkeys(result["reason"] for result in results))
+    if busy:
+        reasons.append(f"예약 중인 종목 {busy}개는 다음 배치에서 재확인")
+    if not reasons:
+        reasons.append("슬랙이 켜진 계좌를 고른 사고팔기 전략이 없습니다.")
+    for sid, error in view["errors"].items():
+        logger.error("사고팔기 운용 현황 실패(%s): %s", sid, error)
+    return {
+        "sent": any(result["sent"] for result in results),
+        "reason": " · ".join(reasons),
+        "triggers": [trigger for result in results for trigger in result["triggers"]],
+    }
 
 
-def _notify_prepared_view(view: dict[str, Any], settings_at_read: dict[str, Any], snapshot_at: str) -> dict[str, Any]:
-    """공유 잠금 아래 최신 발송 기록을 읽어 회수·체결 확인·발송을 처리한다."""
+def _notify_prepared_view(
+    view: dict[str, Any], settings_at_read: dict[str, Any], snapshot_at: str, target: tuple[str, str]
+) -> dict[str, Any]:
+    """예약한 계좌·종목의 최신 기록만 읽어 회수·체결 확인·발송을 처리한다."""
     from utils.strategy_trade_orders import active_order_keys, finished_since_keys
     from utils.strategy_trade_threads import mark_signal_thread_used, record_signal_thread
 
     now = datetime.now(KST)
-    sent_log = _load_sent_log()
+    sent_log = _SentLog(
+        {key: entry for key, entry in _load_sent_log().items() if (entry["account_id"], entry["ticker"]) == target}
+    )
     current_settings = load_settings()
     enabled = {account_id for account_id, entry in current_settings["accounts"].items() if entry["slack_enabled"]}
     configured = set(current_settings["strategies"])
@@ -743,10 +800,12 @@ def _notify_prepared_view(view: dict[str, Any], settings_at_read: dict[str, Any]
         == current_settings["accounts"].get(entry["account_id"])
     }
     view = {
-        "strategies": [s for s in view["strategies"] if s["strategy_id"] in stable_ids],
+        "strategies": [
+            s for s in view["strategies"] if s["strategy_id"] in stable_ids and (s["account_id"], s["ticker"]) == target
+        ],
         "errors": {sid: message for sid, message in view["errors"].items() if sid in stable_ids},
     }
-    expired, withdrawn = _settle_unused_signals(view["strategies"], sent_log, now, configured)
+    expired, withdrawn = _settle_unused_signals(view["strategies"], sent_log, now, configured, target)
     if _close_sessions(view["strategies"], sent_log, now, configured) or expired or withdrawn:
         _save_sent_log(sent_log)
     if expired or withdrawn:
@@ -947,8 +1006,15 @@ def preview_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
     return _manual_signal(payload, fresh=False)[2]
 
 
-@signal_lock()
 def send_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
+    setting = load_settings()["strategies"].get(payload["strategy_id"])
+    if setting is None:
+        raise ValueError("사고팔기 전략을 찾을 수 없습니다.")
+    with signal_lock(setting["account_id"], setting["ticker"]):
+        return _send_manual_signal(payload)
+
+
+def _send_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
     """서버 선점 뒤 Slack 메시지만 발송한다. 증권사 주문은 Slack 확인 경로만 사용한다."""
     from utils.slack_mock_orders import send_signal_order_messages
     from utils.strategy_trade_orders import find_duplicate_order, require_order_session

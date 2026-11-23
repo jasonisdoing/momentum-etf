@@ -901,7 +901,7 @@ def _cancel(target: dict[str, Any], *, reraise: bool = False) -> dict[str, Any] 
 
 
 def _submit_order(target: dict[str, Any]) -> None:
-    """확인된 주문 한 건을 신호 선점 뒤 낸다 — 버튼 확인과 자동 주문이 같이 쓴다. 호출하는 쪽이 `signal_lock` 을 잡고 있어야 한다."""
+    """확인된 주문 한 건을 신호 선점 뒤 낸다 — 버튼 확인과 자동 주문이 같이 쓴다. 호출하는 쪽이 같은 계좌·종목을 `signal_lock`으로 예약해야 한다."""
     from utils.strategy_trade_threads import finish_order_reservation, reserve_signal_for_order
 
     if target["request"].get("mix_action_key") is not None:
@@ -920,7 +920,7 @@ def _submit_order(target: dict[str, Any]) -> None:
 def run_submission(target: dict[str, Any]) -> None:
     """확인된 주문·정정·취소를 처리한다 — 응답 뒤 백그라운드에서 돈다."""
     try:
-        with signal_lock():
+        with signal_lock(target["request"]["account_id"], target["request"]["ticker"]):
             if target["kind"] == "order":
                 _submit_order(target)
             elif target["kind"] == "modify":
@@ -1094,7 +1094,7 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
 
     이미 주문이 진행 중인 회차는 건너뛴다. 주문은 슬랙의 버튼과 모달 확인을 거쳐야 나간다 — 단 「자동」을 켠
     전략의 자동 신호(`is_auto_trigger`)는 메시지를 보낸 뒤 버튼 확인과 같은 경로(`_submit_order`)로 바로 주문한다.
-    호출하는 쪽이 `signal_lock` 을 잡고 있어야 한다.
+    호출하는 쪽이 같은 계좌·종목을 `signal_lock`으로 예약해야 한다.
     """
     account_id = strategy_view["account_id"]
     pending = [
@@ -1365,11 +1365,24 @@ def execute_slack_thread_action(
     confirmation_id: str | None = None,
     before_order: Callable[[dict[str, Any], dict[str, Any]], None] | None = None,
 ) -> None:
-    """웹 통합 모달의 주문·호가정정·취소를 슬랙과 동일한 락·스레드 동기화 경로로 실행한다."""
-    with signal_lock():
+    """웹 통합 모달의 주문·호가정정·취소를 슬랙과 동일한 종목 예약·스레드 동기화 경로로 실행한다."""
+    if kind not in ("order", "modify", "cancel"):
+        raise BrokerApiError(f"지원하지 않는 요청 종류입니다: {kind}")
+    if kind in ("modify", "cancel"):
+        if not order_id:
+            raise BrokerApiError("대상 주문 ID가 없습니다.")
+        record = _orders().find_one({"_id": ObjectId(order_id), "account_id": account_id})
+        if record is None:
+            raise BrokerApiError("주문 기록을 찾을 수 없습니다.")
+        target_ticker = record["ticker"]
+    else:
+        thread = find_signal_thread(thread_ts)
+        message = _match_thread_message(thread, side=side, round_no=round_no, ticker=ticker) if thread else None
+        if not message or message["request"]["account_id"] != account_id:
+            raise BrokerApiError("이 계좌의 주문 신호를 찾을 수 없습니다.")
+        target_ticker = message["request"]["ticker"]
+    with signal_lock(account_id, target_ticker):
         if kind in ("modify", "cancel"):
-            if not order_id:
-                raise BrokerApiError("대상 주문 ID가 없습니다.")
             query: dict[str, Any] = {"_id": ObjectId(order_id), "account_id": account_id}
             if ticker is not None:
                 query["ticker"] = ticker
@@ -1386,11 +1399,9 @@ def execute_slack_thread_action(
                 _cancel(target, reraise=True)
             return
 
-        if kind != "order":
-            raise BrokerApiError(f"지원하지 않는 요청 종류입니다: {kind}")
         thread = find_signal_thread(thread_ts)
         message = _match_thread_message(thread, side=side, round_no=round_no, ticker=ticker) if thread else None
-        if not thread or not message:
+        if not thread or not message or message["request"]["account_id"] != account_id:
             raise BrokerApiError("이미 회수되었거나 스레드 정보를 찾을 수 없습니다.")
         request = message["request"]
         if before_order is not None:

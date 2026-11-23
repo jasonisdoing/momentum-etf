@@ -137,9 +137,13 @@ def _signal_status(record: dict) -> dict[str, str | None]:
     }
 
 
-@signal_lock()
 def withdraw_mix_order_signal(account_id: str, ticker: str, thread_ts: str) -> None:
     """같은 종목의 새 발송과 경합해도 확인창이 가리키는 메시지만 회수한다."""
+    with signal_lock(account_id, ticker):
+        _withdraw_mix_order_signal(account_id, ticker, thread_ts)
+
+
+def _withdraw_mix_order_signal(account_id: str, ticker: str, thread_ts: str) -> None:
     collection = _signals()
     query = {"_id": _signal_id(account_id, ticker), "thread_ts": thread_ts, "state": "sent"}
     record = collection.find_one(query)
@@ -152,7 +156,15 @@ def withdraw_mix_order_signal(account_id: str, ticker: str, thread_ts: str) -> N
 
         thread = find_signal_thread(thread_ts)
         name = next((item["request"]["label"] for item in thread["messages"]), ticker) if thread else ticker
-    entry = {"strategy_id": "mix", "name": name, "round": None, "action": record["side"], "origin": "manual"}
+    entry = {
+        "strategy_id": "mix",
+        "account_id": account_id,
+        "ticker": ticker,
+        "name": name,
+        "round": None,
+        "action": record["side"],
+        "origin": "manual",
+    }
     if not withdraw_signal(thread_ts, "manual", None, entry=entry):
         raise BrokerApiError("이 신호로 낸 주문이 있거나 이미 사용되어 회수할 수 없습니다.")
     collection.delete_one(query)
@@ -184,9 +196,14 @@ def _mix_order_instrument(account_id: str, ticker: str, country: str) -> dict:
     return instrument
 
 
-@signal_lock()
 def send_mix_order_signal(account_id: str, action_key: str, side: str, quantity: int) -> dict:
     """웹에서 다시 확인한 합성 액션(오늘·내일) 한 건을 Slack 주문 스레드로 보낸다."""
+    _, _, item = _current_action(account_id, action_key)
+    with signal_lock(account_id, item["ticker"]):
+        return _send_mix_order_signal(account_id, action_key, side, quantity)
+
+
+def _send_mix_order_signal(account_id: str, action_key: str, side: str, quantity: int) -> dict:
     from utils.slack_mock_orders import send_order_request
 
     positions, group, item = _current_action(account_id, action_key)

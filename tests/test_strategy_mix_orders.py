@@ -1,6 +1,7 @@
 """합성 액션의 Slack 발송과 기존 주문 스레드 연결을 외부 접속 없이 검증한다."""
 
 import json
+from contextlib import nullcontext
 from datetime import datetime
 from types import SimpleNamespace
 from unittest import TestCase
@@ -55,13 +56,20 @@ class MixOrderTest(TestCase):
             patch(
                 "utils.db_manager.get_db_connection", side_effect=AssertionError("테스트에서는 DB 연결을 열지 않는다.")
             ),
+            patch(
+                "utils.strategy_trade_signal_lock.get_db_connection",
+                side_effect=AssertionError("테스트에서는 DB 연결을 열지 않는다."),
+            ),
             patch.object(slack, "_account_line", return_value="계좌 a1"),
+            patch.object(mix, "signal_lock", return_value=nullcontext()),
             patch.object(mix, "_signals", return_value=self.db),
             patch.object(mix, "_orders", return_value=self.orders),
             patch.object(mix, "can_withdraw_signal", return_value=True),
             patch.object(mix, "mix_positions", return_value=self.positions),
             patch.object(mix, "account_env", return_value="live"),
             patch.object(mix, "_require_order_allowed"),
+            patch.object(order_store, "order_limit_lock", return_value=nullcontext()),
+            patch.object(order_store, "_check_order_allowed"),
             patch.object(mix, "account_country", return_value="kor"),
             patch.object(order_store, "is_instrument_trading_time", return_value=True),
             patch.object(order_store, "_order_venue", return_value="KRX"),
@@ -84,7 +92,7 @@ class MixOrderTest(TestCase):
             patch.object(mix, "register_signal_thread") as register,
             patch.object(mix, "submit_order_record") as submit,
         ):
-            result = mix.send_mix_order_signal.__wrapped__("a1", "action", "buy", 36)
+            result = mix.send_mix_order_signal("a1", "action", "buy", 36)
         self.assertFalse(result["already_sent"])
         self.assertIn("합성 오늘의 액션", main.call_args.args[0])
         self.assertEqual(reply.call_args.args[2], "root")
@@ -93,10 +101,10 @@ class MixOrderTest(TestCase):
 
     def test_duplicate_and_unconfirmed_signal_do_not_send(self):
         with patch.object(mix, "send_thread_message") as send:
-            self.assertTrue(mix.send_mix_order_signal.__wrapped__("a1", "action", "buy", 36)["already_sent"])
+            self.assertTrue(mix.send_mix_order_signal("a1", "action", "buy", 36)["already_sent"])
             self.signal["state"] = "sending"
             with self.assertRaisesRegex(BrokerApiError, "발송 결과"):
-                mix.send_mix_order_signal.__wrapped__("a1", "action", "buy", 36)
+                mix.send_mix_order_signal("a1", "action", "buy", 36)
         send.assert_not_called()
 
     def test_withdraw_reuses_slack_path_for_existing_signal(self):
@@ -109,7 +117,7 @@ class MixOrderTest(TestCase):
             patch.object(threads, "_signal_thread_has_orders", return_value=False),
             patch.object(threads, "resume_withdrawal") as resume,
         ):
-            mix.withdraw_mix_order_signal.__wrapped__("a1", "ETF", "root")
+            mix.withdraw_mix_order_signal("a1", "ETF", "root")
         claim = messages.update_one.call_args.args[1]["$set"]
         self.assertIn("종목 매수", claim["withdrawal_text"])
         self.assertNotIn("None호", claim["withdrawal_text"])
@@ -126,12 +134,12 @@ class MixOrderTest(TestCase):
         with patch.object(mix, "withdraw_signal") as withdraw:
             self.db.find_one.return_value = None
             with self.assertRaisesRegex(BrokerApiError, "다른 신호"):
-                mix.withdraw_mix_order_signal.__wrapped__("a1", "ETF", "old")
+                mix.withdraw_mix_order_signal("a1", "ETF", "old")
             withdraw.assert_not_called()
             self.db.find_one.return_value = {**self.signal, "name": "종목"}
             withdraw.return_value = False
             with self.assertRaisesRegex(BrokerApiError, "회수할 수 없습니다"):
-                mix.withdraw_mix_order_signal.__wrapped__("a1", "ETF", "root")
+                mix.withdraw_mix_order_signal("a1", "ETF", "root")
         self.db.delete_one.assert_not_called()
 
     def test_screen_hides_withdraw_when_order_already_exists(self):
@@ -150,7 +158,7 @@ class MixOrderTest(TestCase):
             patch.object(mix, "submit_order_record") as submit,
         ):
             with self.assertRaisesRegex(BrokerApiError, "거래 시간이 아닙니다"):
-                mix.send_mix_order_signal.__wrapped__("a1", "action", "buy", 36)
+                mix.send_mix_order_signal("a1", "action", "buy", 36)
             with self.assertRaisesRegex(BrokerApiError, "거래 시간이 아닙니다"):
                 mix.resolve_mix_order(self.request, "root")
             with self.assertRaisesRegex(BrokerApiError, "거래 시간이 아닙니다"):

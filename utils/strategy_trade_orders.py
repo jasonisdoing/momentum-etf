@@ -51,6 +51,7 @@ from utils.strategy_trade_market import (
     session_trade_date,
 )
 from utils.strategy_trade_service import load_strategy_view
+from utils.strategy_trade_signal_lock import order_limit_lock
 from utils.strategy_trade_threads import SIGNAL_RETENTION_DAYS
 
 KST = ZoneInfo("Asia/Seoul")
@@ -189,9 +190,15 @@ def _today_api_orders(account_id: str) -> list[dict[str, Any]]:
     )
 
 
+def _net_buy_amount(orders: list[dict[str, Any]]) -> int | float:
+    return max(
+        0, sum(record["price"] * record["quantity"] * (1 if record["side"] == "buy" else -1) for record in orders)
+    )
+
+
 def _net_buy_krw(account_id: str, orders: list[dict[str, Any]]) -> int:
     """주문들의 순매수(매수 − 매도, 0 미만은 0)를 원화로 — 금액 한도에 세는 사용량. 순매수가 없으면 환율을 읽지 않는다."""
-    signed = sum(record["price"] * record["quantity"] * (1 if record["side"] == "buy" else -1) for record in orders)
+    signed = _net_buy_amount(orders)
     if signed <= 0:
         return 0
     return round(signed * krw_rate(account_country(account_id)))
@@ -220,6 +227,16 @@ def _require_order_allowed(account_id: str, env: str, amount: int, count: int) -
     금액 한도는 원화로 입력하며, 오늘 API 로 낸 주문의 순매수(매수 − 매도, 0 미만은 0)를 원화로 환산해 비교한다.
     매도는 한도를 쓰지 않고 오히려 되돌려 준다.
     """
+    rate = _order_limit_rate(account_id, env, amount)
+    _check_order_allowed(account_id, env, amount, count, rate)
+
+
+def _order_limit_rate(account_id: str, env: str, amount: int | float) -> float | None:
+    return krw_rate(account_country(account_id)) if env != ACCOUNT_ENV_MOCK and amount > 0 else None
+
+
+def _check_order_allowed(account_id: str, env: str, amount: int | float, count: int, rate: float | None) -> None:
+    """조회한 환율로 최신 계좌 설정·주문 기록을 검사한다. 외부 API는 호출하지 않는다."""
     if env == ACCOUNT_ENV_MOCK:
         return
     doc = next(doc for doc in load_account_docs() if doc["account_id"] == account_id)
@@ -236,8 +253,10 @@ def _require_order_allowed(account_id: str, env: str, amount: int, count: int) -
     # 순매도 주문은 금액 한도를 넘길 수 없다 — 한도를 낮춘 뒤에도 매도는 나가야 한다(환율도 필요 없다).
     if amount <= 0:
         return
-    used_krw = _net_buy_krw(account_id, used)
-    amount_krw = round(amount * krw_rate(account_country(account_id)))
+    if rate is None:
+        raise BrokerApiError("매수 한도 검사에 원화 환율이 필요합니다.")
+    used_krw = round(_net_buy_amount(used) * rate)
+    amount_krw = round(amount * rate)
     if used_krw + amount_krw > max_amount:
         raise BrokerApiError(
             f"오늘 주문 금액 한도({max_amount:,}원)를 넘습니다 — 순매수 이미 {used_krw:,}원, 이번 {amount_krw:,}원입니다."
@@ -551,7 +570,12 @@ def submit_order_record(base: dict[str, Any], side: str, price: int | float) -> 
         "slack_notified": False,
     }
     orders = _orders()
-    inserted = orders.insert_one(doc)
+    amount = price * base["quantity"] * (1 if side == "buy" else -1)
+    rate = _order_limit_rate(base["account_id"], base["env"], amount)
+    # 다른 종목의 주문도 이 기록을 한도 사용량으로 보게 만든 뒤 외부 API를 호출한다.
+    with order_limit_lock(base["account_id"]):
+        _check_order_allowed(base["account_id"], base["env"], amount, 1, rate)
+        inserted = orders.insert_one(doc)
     try:
         placed = place_limit_order(base["account_id"], side, base["ticker"], base["quantity"], price, base["venue"])
     except OrderUncertainError as exc:
