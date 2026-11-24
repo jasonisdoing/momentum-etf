@@ -2,11 +2,11 @@ import type { ColDef } from "ag-grid-community";
 
 import { formatPrice } from "@/lib/price-format";
 
-import { CASH_ROW_TICKER, formatHiddenAmount, formatKrw, getSignedClass, type HoldingsRow } from "./assets-helpers";
+import { CASH_ROW_TICKER, formatHiddenAmount, formatKrw, getCurrentPriceNumber, getSignedClass, type HoldingsRow } from "./assets-helpers";
 
 type HoldingMetrics = Pick<
   HoldingsRow,
-  "weight_pct" | "quantity" | "return_pct" | "pnl_krw" | "valuation_krw" | "daily_change_pct" | "current_price" | "currency"
+  "weight_pct" | "quantity" | "return_pct" | "pnl_krw" | "valuation_krw" | "daily_change_pct" | "current_price" | "current_price_num" | "currency"
 >;
 type HoldingMetricRow = { ticker: string } & Partial<HoldingMetrics>;
 
@@ -32,7 +32,11 @@ export function holdingMetricColumns<T extends HoldingMetricRow>(showAmounts: bo
     },
     currentPrice: {
       colId: "current_price", headerName: "현재가", width: 96, type: "rightAligned",
-      valueGetter: ({ data }) => (data?.current_price == null ? undefined : Number(data.current_price)),
+      valueGetter: ({ data }) => {
+        if (!data) return undefined;
+        const price = getCurrentPriceNumber(data);
+        return price > 0 ? price : undefined;
+      },
       cellRenderer: ({ value, data }: { value?: number; data?: T }) =>
         value == null || Number.isNaN(value) || data?.ticker === CASH_ROW_TICKER ? "-" : formatPrice(value, data?.currency || "KRW"),
     },

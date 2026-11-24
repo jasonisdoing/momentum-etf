@@ -310,7 +310,7 @@ export function buildAutoSaveToastMessage(row: Pick<HoldingsRow, "name" | "curre
   return `${row.name} 저장: ${changes.join(", ")}`;
 }
 
-export function getCurrentPriceNumber(row: GridRow): number {
+export function getCurrentPriceNumber(row: Partial<Pick<HoldingsRow, "current_price" | "current_price_num">>): number {
   const currentPriceNum = Number(row.current_price_num ?? NaN);
   if (!Number.isNaN(currentPriceNum) && currentPriceNum > 0) {
     return currentPriceNum;
