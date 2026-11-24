@@ -627,6 +627,7 @@ function comparableDrafts(rows: DraftRow[]) {
 type TradeListRow = DraftRow & {
   held: boolean;
   heldRounds: string;
+  heldFull: boolean;
   drawdown_pct?: number | null;
   mdd_pct?: number | null;
   high_drawdown_pct?: number | null;
@@ -724,7 +725,7 @@ function displayWeights(values: number[], total: number): number[] {
 }
 
 function tradeListLabel(key: string, name: string): TradeListRow {
-  return { key, ticker: "", name, strategy_id: null, pct: "", amount: "", rounds: "", auto: false, held: false, heldRounds: "", is_label: true };
+  return { key, ticker: "", name, strategy_id: null, pct: "", amount: "", rounds: "", auto: false, held: false, heldRounds: "", heldFull: false, is_label: true };
 }
 
 const tradeSettingColumns = [
@@ -901,6 +902,8 @@ function AccountSettingsCard({
         heldRounds: !strategy || strategy.ticker !== row.ticker
           ? "미저장"
           : "error" in strategy ? "오류" : `${strategy.status.held_count}/${strategy.config.rounds}`,
+        heldFull: Boolean(strategy && strategy.ticker === row.ticker && !("error" in strategy)
+          && strategy.status.held_count >= strategy.config.rounds),
       };
     });
     const summary = accountAssets?.summary;
@@ -1078,7 +1081,14 @@ function AccountSettingsCard({
         </span>
       ),
     } satisfies ColDef<TradeListRow>,
-    { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned", cellStyle: { fontWeight: 700 } } satisfies ColDef<TradeListRow>,
+    {
+      field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned",
+      cellStyle: ({ data }) => ({
+        fontWeight: 700,
+        color: data?.heldFull ? "var(--tblr-red, #d63939)" : "inherit",
+        backgroundColor: data?.heldFull ? "color-mix(in srgb, var(--tblr-red, #d63939) 15%, transparent)" : "transparent",
+      }),
+    } satisfies ColDef<TradeListRow>,
     { ...quantity, headerName: "보유수량", width: 88 },
     tradeWeightColumn,
     returnPct, valuation, pnl,
