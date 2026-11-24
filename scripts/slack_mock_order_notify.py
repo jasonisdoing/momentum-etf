@@ -14,18 +14,22 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
+from services.meritz_api_service import MeritzTokenExpiredError
 from utils.env import load_env_if_present
 from utils.slack_mock_orders import notify_close_approaching, notify_finished_orders, sync_signal_threads
 
 
 def main() -> int:
     load_env_if_present()
-    finished = notify_finished_orders()
-    closing = notify_close_approaching()
+    finished, failures = notify_finished_orders()
+    excluded = set(failures)
+    closing = notify_close_approaching(excluded)
+    synced = sync_signal_threads(excluded)
     print(
-        f"[slack_mock_order_notify] 결과 알림 {finished}건, 마감 경고 {closing}건, 완료 스레드 {sync_signal_threads()}건"
+        f"[slack_mock_order_notify] 결과 알림 {finished}건, 마감 경고 {closing}건, 완료 스레드 {synced}건"
+        f" · 조회·알림 보류 계좌: {', '.join(sorted(excluded)) or '없음'}"
     )
-    return 0
+    return int(any(not isinstance(exc, MeritzTokenExpiredError) for exc in failures.values()))
 
 
 if __name__ == "__main__":

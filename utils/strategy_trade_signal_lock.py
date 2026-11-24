@@ -126,6 +126,15 @@ def order_limit_lock(account_id: str):
     )
 
 
+def broker_token_lock(account_id: str):
+    """계좌별 인증 갱신만 선점한다. 종목의 신호·주문 예약과는 별개다."""
+    return _db_lock(
+        f"meritz_token_lock:{account_id}",
+        f"{account_id} 인증 토큰을 갱신 중입니다. 잠시 후 다시 조회하세요.",
+        wait_seconds=_LOCK_WAIT_SECONDS,
+    )
+
+
 def signal_thread_lock(thread_ts: str):
     """한 스레드의 반응 동기화만 직렬화한다."""
     return _db_lock(

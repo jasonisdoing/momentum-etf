@@ -1,7 +1,12 @@
 """사용자가 요청한 수동 Slack 신호 생명주기 회귀 검증. 외부 전송·주문·DB는 사용하지 않는다."""
 
+import base64
+import json
+import time
+from contextlib import redirect_stdout
 from copy import deepcopy
 from datetime import date, datetime, timedelta
+from io import StringIO
 from threading import Event, Lock, Thread
 from types import SimpleNamespace
 from unittest import TestCase, main
@@ -10,6 +15,7 @@ from unittest.mock import Mock, patch
 import requests
 from pymongo.errors import DuplicateKeyError
 
+from scripts import slack_mock_order_notify as order_job
 from services import meritz_api_service as meritz
 from services.broker_api_service import BrokerApiError, OrderUncertainError
 from utils import slack_mock_orders as slack
@@ -17,6 +23,7 @@ from utils import strategy_trade_ledger as ledger
 from utils import strategy_trade_notify as notify
 from utils import strategy_trade_orders as orders
 from utils import strategy_trade_service as trade_service
+from utils import strategy_trade_signal_lock as locking
 from utils import strategy_trade_threads as threads
 from utils.strategy_trade_ledger import _day_trades
 
@@ -1095,6 +1102,7 @@ class MeritzOrderTransportTest(TestCase):
         self.response.json.return_value = {"rsp_cd": "5766", "data": []}
         patches = {
             "token": patch.object(meritz, "_access_token", return_value="secret-token"),
+            "token_db": patch.object(meritz, "_token_collection", return_value=Mock(find_one=Mock(return_value={}))),
             "mac": patch.object(meritz, "_mac_address", return_value="secret-mac"),
             "refresh": patch.object(meritz, "_issue_token", return_value="refreshed-token"),
             "get": patch.object(meritz.requests, "get", return_value=self.response),
@@ -1262,10 +1270,32 @@ class MeritzOrderTransportTest(TestCase):
         self.response.json.return_value = {"rsp_cd": meritz._TOKEN_EXPIRED_CODE}
         with self.assertRaises(meritz.MeritzTokenExpiredError):
             meritz._get("a1", meritz.HOLDINGS_PATH, {})
-        self.assertEqual(self.mocks["get"].call_count, 2)
-        self.mocks["refresh"].assert_called_once_with("a1")
-        self.mocks["sleep"].assert_not_called()
+        self.assertEqual(self.mocks["get"].call_count, 4)
+        self.mocks["refresh"].assert_called_once_with("a1", "secret-token")
+        self.assertEqual([call.args[0] for call in self.mocks["sleep"].call_args_list], [1.0, 2.0])
         self.assertIn("stage=authentication", self.diagnostics())
+
+    def test_refreshed_token_recovers_after_delayed_get_without_reissuing(self):
+        expired = Mock(status_code=401)
+        expired.json.return_value = {"rsp_cd": meritz._TOKEN_EXPIRED_CODE}
+        self.mocks["get"].side_effect = [expired, expired, self.response]
+        self.assertEqual(meritz._get("a1", meritz.HOLDINGS_PATH, {})["rsp_cd"], "5766")
+        self.assertEqual(self.mocks["get"].call_count, 3)
+        self.mocks["refresh"].assert_called_once_with("a1", "secret-token")
+        self.mocks["sleep"].assert_called_once_with(1.0)
+        self.assertIn("outcome=recovered", self.diagnostics())
+        self.mocks["post"].assert_not_called()
+
+    def test_post_auth_rejection_does_not_enter_get_delay_retry_loop(self):
+        self.response.status_code = 401
+        self.response.json.return_value = {"rsp_cd": meritz._TOKEN_EXPIRED_CODE}
+        self.mocks["post"].side_effect = None
+        self.mocks["post"].return_value = self.response
+        with self.assertRaises(BrokerApiError):
+            meritz._request("a1", "POST", meritz.ORDER_PATH["buy"], success=meritz._ORDER_CODES, body={})
+        self.assertEqual(self.mocks["post"].call_count, 2)
+        self.mocks["refresh"].assert_called_once()
+        self.mocks["sleep"].assert_not_called()
 
     def test_token_refresh_does_not_reset_network_retry_budget(self):
         token_error = Mock(status_code=401)
@@ -1281,6 +1311,236 @@ class MeritzOrderTransportTest(TestCase):
         self.assertEqual(self.mocks["get"].call_count, 4)
         self.mocks["refresh"].assert_called_once()
         self.assertEqual(len(self.mocks["sleep"].call_args_list), 2)
+
+
+class MeritzTokenRefreshTest(TestCase):
+    """공유 토큰의 중복 발급·만료 연장과 다른 계좌의 간섭을 막는지 검증한다."""
+
+    def setUp(self):
+        self.config = MemoryCollection()
+        self.now = time.time()
+        self.response = Mock(ok=True, status_code=200)
+        self.response.json.return_value = {"access_token": "new-private-token", "expires_in": 43200}
+        self.post = Mock(return_value=self.response)
+        self.log = Mock()
+        patches = [
+            patch.object(meritz, "_token_collection", return_value=self.config),
+            patch.object(locking, "get_db_connection", return_value={"system_config": self.config}),
+            patch.object(meritz, "require_env_keys", return_value=("private-key", "private-secret")),
+            patch.object(meritz.requests, "post", self.post),
+            patch.object(meritz.requests, "get", side_effect=AssertionError("실제 조회 금지")),
+            patch.object(meritz, "logger", self.log),
+        ]
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+
+    def put(self, token, expiry, issued):
+        self.config.insert_one({"_id": "meritz_token:a1", "token": token, "exp": expiry, "issued_at": issued})
+
+    def jwt(self, expiry):
+        claims = json.dumps({"exp": expiry, "iat": self.now - 20, "private": "private-claims"}).encode()
+        payload = base64.urlsafe_b64encode(claims).decode().rstrip("=")
+        return f"header.{payload}.signature"
+
+    def test_concurrent_workers_issue_one_token(self):
+        entered, contended, release = Event(), Event(), Event()
+        results, failures = [], []
+        insert = self.config.insert_one
+
+        def watched_insert(doc):
+            try:
+                return insert(doc)
+            except DuplicateKeyError:
+                contended.set()
+                raise
+
+        def slow_issue(*args, **kwargs):
+            entered.set()
+            if not release.wait(3):
+                raise AssertionError("갱신 대기 시간 초과")
+            return self.response
+
+        def worker():
+            try:
+                results.append(meritz._access_token("a1"))
+            except Exception as exc:
+                failures.append(exc)
+
+        self.post.side_effect = slow_issue
+        with patch.object(self.config, "insert_one", side_effect=watched_insert):
+            first, second = Thread(target=worker), Thread(target=worker)
+            first.start()
+            try:
+                self.assertTrue(entered.wait(2))
+                second.start()
+                self.assertTrue(contended.wait(2))
+            finally:
+                release.set()
+                first.join(3)
+                if second.ident is not None:
+                    second.join(3)
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertFalse(failures)
+        self.assertEqual(results, ["new-private-token", "new-private-token"])
+        self.post.assert_called_once()
+
+    def test_rejected_old_token_reuses_current_token_and_recent_same_token(self):
+        self.put("current-private-token", self.now + 1000, self.now)
+        self.assertEqual(meritz._issue_token("a1", "old-private-token"), "current-private-token")
+        self.assertEqual(meritz._issue_token("a1", "current-private-token"), "current-private-token")
+        self.post.assert_not_called()
+
+    def test_another_account_refresh_is_not_blocked(self):
+        with locking.broker_token_lock("a1"):
+            self.assertEqual(meritz._access_token("a2"), "new-private-token")
+        self.post.assert_called_once()
+
+    def test_refresh_contention_defers_without_issuing_or_changing_token(self):
+        with locking.broker_token_lock("a1"):
+            with patch.object(locking, "monotonic", side_effect=[0, locking._LOCK_WAIT_SECONDS + 1]):
+                with self.assertRaises(meritz.MeritzTokenRefreshBusyError):
+                    meritz._issue_token("a1", None)
+        self.post.assert_not_called()
+
+    def test_jwt_expiry_caps_reported_lifetime_and_logs_only_fingerprints(self):
+        expiry = int(self.now + 1800)
+        token = self.jwt(expiry)
+        self.response.json.return_value["access_token"] = token
+        self.assertEqual(meritz._access_token("a1"), token)
+        self.assertEqual(self.config.find_one({"_id": "meritz_token:a1"})["exp"], expiry)
+        diagnostic = "\n".join(call.args[0] % call.args[1:] for call in self.log.method_calls)
+        for secret in (token, "private-claims", "private-key", "private-secret"):
+            self.assertNotIn(secret, diagnostic)
+        self.assertIn("token_exp=", diagnostic)
+        self.assertIn("token_fp=", diagnostic)
+
+    def test_same_token_response_does_not_extend_existing_expiry(self):
+        expiry = self.now + 1000
+        self.put("same-private-token", expiry, self.now - 60)
+        self.response.json.return_value["access_token"] = "same-private-token"
+        meritz._issue_token("a1", "same-private-token")
+        self.assertEqual(self.config.find_one({"_id": "meritz_token:a1"})["exp"], expiry)
+        self.post.assert_called_once()
+
+    def test_returned_expired_jwt_is_not_saved_as_fresh(self):
+        self.response.json.return_value["access_token"] = self.jwt(self.now - 1)
+        with self.assertRaises(meritz.MeritzTokenExpiredError):
+            meritz._access_token("a1")
+        self.assertIsNone(self.config.find_one({"_id": "meritz_token:a1"}))
+
+    def test_cached_jwt_actual_expiry_overrides_incorrect_local_lifetime(self):
+        self.put(self.jwt(self.now - 1), self.now + 43200, self.now - 60)
+        self.assertEqual(meritz._access_token("a1"), "new-private-token")
+        self.post.assert_called_once()
+
+
+class OrderNotificationIsolationTest(TestCase):
+    def test_account_failure_does_not_change_its_orders_or_stop_next_account(self):
+        records = {
+            account: [
+                {
+                    "_id": account,
+                    "account_id": account,
+                    "country": "kor",
+                    "order_no": account,
+                    "created_at": orders._now().isoformat(),
+                    "status": "pending",
+                }
+            ]
+            for account in ("a1", "a2")
+        }
+        store = Mock()
+        store.distinct.return_value = ["a1", "a2"]
+        store.find.side_effect = lambda query: records[query["account_id"]]
+
+        def broker(account, day):
+            if account == "a1":
+                raise meritz.MeritzTokenExpiredError("token expired")
+            return [{"order_no": "a2", "status": "filled", "filled_quantity": 1, "average_fill_price": 100}]
+
+        with (
+            patch.object(orders, "_orders", return_value=store),
+            patch.object(orders, "list_day_orders", side_effect=broker),
+            patch.object(orders, "_broker_status", side_effect=lambda record, state: state),
+        ):
+            failures = orders.refresh_slack_order_accounts()
+        self.assertEqual(set(failures), {"a1"})
+        store.update_one.assert_called_once()
+        self.assertEqual(store.update_one.call_args.args[0], {"_id": "a2"})
+        self.assertEqual(store.update_one.call_args.args[1]["$set"]["status"], "filled")
+
+    def test_successful_accounts_keep_result_notifications(self):
+        failures = {"a1": meritz.MeritzTokenExpiredError("expired")}
+        records = [{"_id": account, "account_id": account} for account in ("a1", "a2")]
+        with (
+            patch.object(slack, "refresh_slack_order_accounts", return_value=failures),
+            patch.object(slack, "finished_slack_orders", return_value=records),
+            patch.object(slack, "_target_of", side_effect=lambda record: record),
+            patch.object(slack, "serialize_order", side_effect=lambda record: record),
+            patch.object(slack, "_finish") as finish,
+            patch.object(slack, "mark_slack_notified") as notified,
+        ):
+            sent, pending = slack.notify_finished_orders()
+        self.assertEqual(sent, 1)
+        self.assertEqual(set(pending), {"a1"})
+        finish.assert_called_once_with(records[1], records[1])
+        notified.assert_called_once_with("a2")
+
+    def test_failed_accounts_are_excluded_from_thread_sync(self):
+        threads_to_sync = [
+            {"thread_ts": account, "messages": [{"request": {"account_id": account}}]} for account in ("a1", "a2")
+        ]
+        with (
+            patch.object(slack, "signal_threads", return_value=threads_to_sync),
+            patch.object(slack, "sync_signal_thread", return_value=orders.MESSAGE_DONE) as sync,
+        ):
+            self.assertEqual(slack.sync_signal_threads({"a1"}), 1)
+        sync.assert_called_once_with("a2")
+
+    def test_other_accounts_still_receive_close_warning(self):
+        records = [{"_id": account, "account_id": account} for account in ("a1", "a2")]
+        order = {
+            "id": "a2",
+            "env": "live",
+            "side": "buy",
+            "quantity": 2,
+            "filled_quantity": 0,
+            "price": 100,
+            "country": "kor",
+            "pair_id": None,
+        }
+        with (
+            patch.object(slack, "close_warning_slack_orders", return_value=records),
+            patch.object(slack, "serialize_order", return_value=order),
+            patch.object(slack, "_request_of", return_value={}),
+            patch.object(slack, "_target_of", return_value={"thread_ts": "a2"}),
+            patch.object(slack, "close_warning_text", return_value="마감"),
+            patch.object(slack, "_cancel_blocks", return_value=[]),
+            patch.object(slack, "_note", return_value={}),
+            patch.object(slack, "_update_message"),
+            patch.object(slack, "send_thread_message") as send,
+            patch.object(slack, "mark_slack_close_warned") as mark,
+        ):
+            self.assertEqual(slack.notify_close_approaching({"a1"}), 1)
+        send.assert_called_once()
+        self.assertEqual(send.call_args.kwargs["thread_ts"], "a2")
+        mark.assert_called_once_with("a2")
+
+    def test_batch_continues_warning_and_sync_and_reports_non_token_errors(self):
+        for failure, exit_code in ((meritz.MeritzTokenExpiredError("expired"), 0), (BrokerApiError("other"), 1)):
+            with (
+                self.subTest(failure=type(failure).__name__),
+                patch.object(order_job, "load_env_if_present"),
+                patch.object(order_job, "notify_finished_orders", return_value=(1, {"a1": failure})),
+                patch.object(order_job, "notify_close_approaching", return_value=2) as warning,
+                patch.object(order_job, "sync_signal_threads", return_value=3) as sync,
+                redirect_stdout(StringIO()),
+            ):
+                self.assertEqual(order_job.main(), exit_code)
+                warning.assert_called_once_with({"a1"})
+                sync.assert_called_once_with({"a1"})
 
 
 if __name__ == "__main__":

@@ -973,22 +973,29 @@ def _target_of(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def notify_finished_orders() -> int:
-    """슬랙으로 낸 주문 중 끝난 것(체결·취소·거부)을 스레드로 알리고 메시지 버튼을 걷어낸다 — 알린 건수를 돌려준다."""
-    refresh_slack_order_accounts()
-    records = finished_slack_orders()
-    for record in records:
-        _finish(_target_of(record), serialize_order(record))
-        mark_slack_notified(record["_id"])
-    return len(records)
+def notify_finished_orders() -> tuple[int, dict[str, Exception]]:
+    """결과 알림을 계좌별로 격리하고 (알린 건수, 보류·실패 계좌)를 돌려준다."""
+    failures = refresh_slack_order_accounts()
+    sent = 0
+    for record in finished_slack_orders():
+        if record["account_id"] in failures:
+            continue
+        try:
+            _finish(_target_of(record), serialize_order(record))
+            mark_slack_notified(record["_id"])
+            sent += 1
+        except Exception as exc:
+            failures[record["account_id"]] = exc
+            logger.exception("슬랙 주문 결과 알림 실패: account=%s record=%s", record["account_id"], record["_id"])
+    return sent, failures
 
 
-def notify_close_approaching() -> int:
+def notify_close_approaching(excluded_accounts: set[str]) -> int:
     """장 마감이 가까운데 체결되지 않은 슬랙 주문을 스레드로 경고하고 메시지에 취소 버튼을 다시 띄운다 — 경고한 건수.
 
     주문 상태는 직전의 `notify_finished_orders` 가 갱신해 둔 것을 쓴다.
     """
-    records = close_warning_slack_orders()
+    records = [record for record in close_warning_slack_orders() if record["account_id"] not in excluded_accounts]
     for record in records:
         order = serialize_order(record)
         request = _request_of(record)
@@ -1052,9 +1059,13 @@ def _apply_thread_reaction(thread: dict[str, Any]) -> str | None:
     return state
 
 
-def sync_signal_threads() -> int:
+def sync_signal_threads(excluded_accounts: set[str]) -> int:
     """추적 중인 신호 스레드의 반응을 모두 맞춘다(체결·취소 결과가 반영된 뒤) — 완료한 스레드 수."""
-    return sum(sync_signal_thread(thread["thread_ts"]) == MESSAGE_DONE for thread in signal_threads())
+    return sum(
+        sync_signal_thread(thread["thread_ts"]) == MESSAGE_DONE
+        for thread in signal_threads()
+        if all(message["request"]["account_id"] not in excluded_accounts for message in thread["messages"])
+    )
 
 
 def close_session_threads(strategies: list[dict[str, Any]]) -> int:

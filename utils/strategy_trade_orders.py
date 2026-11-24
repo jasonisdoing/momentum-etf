@@ -886,12 +886,24 @@ def refreshed_order(account_id: str, order_id: str) -> dict[str, Any]:
     return serialize_order(record)
 
 
-def refresh_slack_order_accounts() -> int:
-    """진행 중인 슬랙 주문이 있는 계좌의 상태를 증권사 체결 조회로 갱신하고, 갱신한 계좌 수를 돌려준다."""
+def refresh_slack_order_accounts() -> dict[str, Exception]:
+    """계좌별로 조회 실패를 격리한다. 실패한 계좌는 기존 주문 상태로 다음 조회를 기다린다."""
+    from services.meritz_api_service import MeritzTokenExpiredError
+
     accounts = _orders().distinct("account_id", {"slack": {"$ne": None}, "status": {"$in": list(ACTIVE_STATUSES)}})
+    failures: dict[str, Exception] = {}
     for account_id in accounts:
-        refresh_account_orders(account_id)
-    return len(accounts)
+        try:
+            refresh_account_orders(account_id)
+        except Exception as exc:
+            failures[account_id] = exc
+            if isinstance(exc, MeritzTokenExpiredError):
+                logger.warning(
+                    "[BROKER-ORDER] account=%s outcome=deferred reason=token_expired detail=%s", account_id, exc
+                )
+            else:
+                logger.exception("[BROKER-ORDER] account=%s outcome=refresh_failed", account_id)
+    return failures
 
 
 def finished_slack_orders() -> list[dict[str, Any]]:
