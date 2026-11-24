@@ -1,7 +1,7 @@
 """사용자가 요청한 수동 Slack 신호 생명주기 회귀 검증. 외부 전송·주문·DB는 사용하지 않는다."""
 
 from copy import deepcopy
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from threading import Event, Lock, Thread
 from types import SimpleNamespace
 from unittest import TestCase, main
@@ -13,8 +13,10 @@ from pymongo.errors import DuplicateKeyError
 from services import meritz_api_service as meritz
 from services.broker_api_service import BrokerApiError, OrderUncertainError
 from utils import slack_mock_orders as slack
+from utils import strategy_trade_ledger as ledger
 from utils import strategy_trade_notify as notify
 from utils import strategy_trade_orders as orders
+from utils import strategy_trade_service as trade_service
 from utils import strategy_trade_threads as threads
 from utils.strategy_trade_ledger import _day_trades
 
@@ -908,6 +910,181 @@ class ManualSignalsTest(TestCase):
         with patch("utils.strategy_trade_ledger.is_buy", return_value=True):
             trades = _day_trades(rows, "ETF", datetime(2030, 1, 2).date(), sources)
         self.assertEqual([t.source for t in trades], ["manual", "manual_slack", "slack"])
+
+
+class TradeLedgerRecoveryTest(TestCase):
+    """회차 복구·설정 저장·주문 차단이 실제 보유를 추정값으로 바꾸지 않는지 검증한다."""
+
+    def setUp(self):
+        self.today = date(2026, 11, 24)
+        self.cache = MemoryCollection()
+        self.rows = {}
+        timeline = [
+            ("2026-10-21", True, 37, 16750),
+            ("2026-10-22", True, 39, 16750),
+            ("2026-10-27", True, 74, 15980),
+            ("2026-11-09", False, 50, 16060),
+            ("2026-11-12", True, 64, 15625),
+            ("2026-11-13", False, 64, 15980),
+            ("2026-11-18", True, 36, 15740),
+            ("2026-11-20", False, 23, 15610),
+        ]
+        for index, (day, buy, quantity, price) in enumerate(timeline):
+            self.rows[date.fromisoformat(day)] = [
+                {
+                    "ticker": "ETF",
+                    "order_no": str(index + 1),
+                    "side_label": "매수" if buy else "매도",
+                    "filled_quantity": quantity,
+                    "average_fill_price": price,
+                }
+            ]
+        day = date(2026, 10, 21)
+        while day < self.today:
+            if day.weekday() < 5:
+                self.cache.insert_one({"_id": f"a1:{day:%Y%m%d}", "rows": self.rows.get(day, [])})
+            day += timedelta(days=1)
+        self.sources = {
+            ("20261113", "6"): (ledger.SOURCE_AUTO, ledger.REGULAR_SELL),
+            ("20261120", "8"): (ledger.SOURCE_API, ledger.REGULAR_SELL),
+        }
+        self.history = ledger._History("a1", self.today, [], self.sources)
+        self.collection = Mock()
+        self.collection.find_one.return_value = {}
+        self.current = {
+            "s1": {
+                "account_id": "a1",
+                "ticker": "ETF",
+                "pool": "test",
+                "name": "종목",
+                "trigger_pct": 5,
+                "round_size": 10,
+                "rounds": 10,
+                "auto_order": False,
+            }
+        }
+        patches = [
+            patch("utils.db_manager.get_db_connection", side_effect=AssertionError("실제 DB 금지")),
+            patch.object(ledger, "account_country", return_value="kor"),
+            patch.object(ledger, "_cache", return_value=self.cache),
+            patch.object(ledger, "_past_fills", side_effect=self.recent_fills),
+            patch.object(ledger, "list_day_orders", side_effect=AssertionError("과거 추가 API 조회 금지")),
+            patch.object(
+                trade_service, "_trade_account_docs", return_value=[{"account_id": "a1", "country_code": "kor"}]
+            ),
+            patch.object(trade_service, "load_settings", return_value={"strategies": self.current}),
+            patch.object(trade_service, "_eligible_pool_kinds", return_value=[]),
+            patch.object(trade_service, "_ticker_options", return_value={}),
+            patch.object(trade_service, "_settings_collection", return_value=self.collection),
+            patch.object(trade_service, "_withdraw_changed_signals"),
+        ]
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+
+    def recent_fills(self, account, day):
+        if day < self.today - timedelta(days=ledger.LOOKBACK_DAYS):
+            raise AssertionError("최근 기간 이전은 저장 캐시만 사용해야 합니다.")
+        return self.rows.get(day, [])
+
+    def save(self, changes):
+        row = {**self.current["s1"], "strategy_id": "s1", **changes}
+        trade_service._save_account_trade("a1", True, [row], [])
+
+    def test_amount_and_nonreducing_settings_save_without_unblocking_orders(self):
+        for changes in ({"round_size": 50}, {"trigger_pct": 8}, {"auto_order": True}, {"rounds": 12}, {}):
+            with self.subTest(changes=changes), patch.object(trade_service, "read_ledgers") as read:
+                self.collection.update_one.reset_mock()
+                self.save(changes)
+                read.assert_not_called()
+                self.collection.update_one.assert_called_once()
+                saved = self.collection.update_one.call_args.args[1]["$set"]["strategies.s1"]
+                self.assertEqual(saved["round_size"], changes.get("round_size", 10))
+        with (
+            patch.object(orders, "account_env", return_value="live"),
+            patch.object(orders, "load_strategy_view", return_value={"error": "과거 체결 이력 부족"}),
+            patch.object(orders, "submit_order_record") as submit,
+        ):
+            with self.assertRaises(orders.OrderPrecheckError):
+                orders.place_order("a1", "test", "s1", "sell", 1, {"thread_ts": "root"})
+        submit.assert_not_called()
+
+    def test_reducing_rounds_requires_known_ledger_and_sufficient_rounds(self):
+        with patch.object(trade_service, "read_ledgers", return_value={"ETF": ledger.LedgerError("이력 부족")}):
+            with self.assertRaises(ValueError):
+                self.save({"rounds": 5})
+        self.collection.update_one.assert_not_called()
+        known = SimpleNamespace(lots=[ledger.Lot(1, 100, "2026-10-21", ledger.SOURCE_MANUAL)] * 3)
+        with patch.object(trade_service, "read_ledgers", return_value={"ETF": known}):
+            with self.assertRaises(ValueError):
+                self.save({"rounds": 2})
+            self.collection.update_one.assert_not_called()
+            self.save({"rounds": 5})
+        self.collection.update_one.assert_called_once()
+
+    def test_cached_recovery_matches_broker_quantity_and_preserves_old_prices(self):
+        trades, closing = ledger._from_window(self.history, "ETF", 113)
+        lots = ledger._replay(closing, [])
+        self.assertEqual(sum(lot.shares for lot in lots), 113)
+        self.assertEqual([(lot.shares, lot.price) for lot in lots], [(37, 16750), (63, 15980), (13, 15740)])
+        self.assertEqual(trades[0].day, "2026-10-21")
+        later = ledger._History("a1", date(2026, 12, 31), [], self.sources)
+        _, carried = ledger._from_anchor(
+            {"as_of": "2026-11-23", "lots": [lot.__dict__ for lot in closing]}, later, "ETF", 113
+        )
+        self.assertEqual(carried, closing)
+
+    def test_cached_gap_does_not_bridge_to_older_trades_or_save_anchor(self):
+        self.cache.delete_one({"_id": "a1:20261023"})
+        with self.assertRaises(ledger.LedgerError) as caught:
+            ledger._from_window(self.history, "ETF", 113)
+        self.assertIn("2026-10-23", str(caught.exception))
+        self.assertIn("76주", str(caught.exception))
+        empty = Mock()
+        empty.find.return_value = []
+        frozen = datetime(2026, 11, 24, 10, tzinfo=ledger.KST)
+        with (
+            patch.object(ledger, "datetime", wraps=datetime) as clock,
+            patch.object(ledger, "_consistent_snapshot", return_value=({"ETF": (113, 16000)}, [])),
+            patch.object(orders, "order_sources", return_value=self.sources),
+            patch.object(ledger, "_anchors", return_value=empty),
+            patch.object(ledger, "_snapshots", return_value=empty),
+            patch.object(ledger, "_replace_ledger_document") as write,
+        ):
+            clock.now.return_value = frozen
+            result = ledger.refresh_ledgers("a1", ["ETF"])
+        self.assertIsInstance(result["ETF"], ledger.LedgerError)
+        self.assertEqual(write.call_count, 1)
+        self.assertIn("error", write.call_args.args[1])
+        self.assertNotIn("lots", write.call_args.args[1])
+
+    def test_cached_quantity_mismatch_is_not_accepted_as_new_basis(self):
+        with self.assertRaises(ledger.LedgerError):
+            ledger._from_window(self.history, "ETF", 112)
+
+    def test_sell_target_bought_before_window_is_recovered_from_original_trade(self):
+        self.rows[date(2026, 11, 9)][0]["filled_quantity"] = 39
+        self.sources[("20261109", "4")] = (ledger.SOURCE_AUTO, "2026-10-22:2")
+        _, closing = ledger._from_window(self.history, "ETF", 124)
+        self.assertEqual([(lot.shares, lot.price) for lot in closing], [(37, 16750), (74, 15980), (13, 15740)])
+
+    def test_intraday_flat_point_excludes_prior_unknown_holdings(self):
+        row = {
+            "ticker": "ETF",
+            "order_no": "0",
+            "side_label": "매도",
+            "filled_quantity": 50,
+            "average_fill_price": 17000,
+        }
+        self.cache.docs[0]["rows"].insert(0, row)
+        trades, closing = ledger._from_window(self.history, "ETF", 113)
+        self.assertTrue(trades[0].buy)
+        self.assertEqual(sum(lot.shares for lot in closing), 113)
+
+    def test_invalid_remaining_buy_price_is_not_replaced_with_average(self):
+        self.cache.docs[0]["rows"][0]["average_fill_price"] = 0
+        with self.assertRaises(ledger.LedgerError):
+            ledger._from_window(self.history, "ETF", 113)
 
 
 class MeritzOrderTransportTest(TestCase):

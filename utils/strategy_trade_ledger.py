@@ -8,7 +8,7 @@
   1. **기준점**(`strategy_trade_ledger_anchors`) — 마지막으로 확정한 전 거래일 마감 기준 회차(로트). 그 다음 날부터의
      체결만 더한다. 한 번 확정한 회차는 산 지 오래돼도 체결가가 이어진다. 재생 결과가 잔고와 다르면 기준점을 버리고 2로 간다.
   2. **최근 `LOOKBACK_DAYS` 일** — 그 전의 보유(`잔고 − 기간 순매수`)를 체결가를 모르는 기초분으로 맨 아래에 두고 재생한다.
-     기초분이 모두 팔려 남은 보유가 전부 기간 안 매수로 설명되면 확정이고, 기초분이 남으면 체결가를 알 수 없어 오류다.
+     기초분이 남으면 이전 날짜의 연속된 저장 캐시를 거슬러 보유가 0이던 시점부터 복구한다. 캐시가 끊기면 오류다.
   재생 결과가 잔고와 다르면 평균단가로 대신하지 않고 `LedgerError` 로 알린다.
 - 재생은 주식 단위다. 가격 순서가 역전되는 매수는 임의 매수로 보관하고, 전략 주문은 기록된 매도 대상에서 뺀다.
   회차는 원주문(정정 포함) 단위 매수 로트 하나다.
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from math import isfinite
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -35,7 +36,7 @@ KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_day_fills"
 SNAPSHOT_COLLECTION = "strategy_trade_ledgers"
 ANCHOR_COLLECTION = "strategy_trade_ledger_anchors"
-#: 기준점이 없을 때 재생하는 기간(달력일) — 그 전에 산 보유가 남아 있으면 체결가를 알 수 없어 오류다.
+#: 기준점이 없을 때 우선 조회하는 기간(달력일). 이전 보유 복구에는 저장된 체결 캐시만 쓴다.
 LOOKBACK_DAYS = 30
 #: 매도 체결에 실현손익(`Trade.realized`)을 기록하기 시작한 날(YYYY-MM-DD) — 이 날 이전 체결은 값이 없어 집계하지 않는다.
 REALIZED_RECORDED_SINCE = "2026-11-12"
@@ -338,7 +339,7 @@ def _from_anchor(
 def _from_window(history: _History, ticker: str, quantity: int) -> tuple[list[Trade], list[Lot]]:
     """최근 기간을 재생한다 — 기간 전 보유는 체결가를 모르는 기초분으로 맨 아래에 둔다.
 
-    → (체결, 어제 마감 로트). 재생 뒤 기초분이 남으면 체결가를 알 수 없어 LedgerError.
+    → (체결, 어제 마감 로트). 기초분이 남으면 이전 저장 캐시로 보유 시작점을 복구한다.
     """
     past, today = history.trades(ticker, history.today - timedelta(days=LOOKBACK_DAYS))
     base = quantity - sum(trade.shares if trade.buy else -trade.shares for trade in past + today)
@@ -347,15 +348,60 @@ def _from_window(history: _History, ticker: str, quantity: int) -> tuple[list[Tr
             f"최근 {LOOKBACK_DAYS}일 순매수가 증권사 잔고 {quantity:,}주보다 많습니다 — 체결 이력이 맞지 않습니다."
         )
     recorded: list[Trade] = []
-    closing = _replay([Lot(base, 0.0, "", _SOURCE_UNKNOWN)] if base else [], past, recorded)
-    lots = _replay(closing, today)
+    try:
+        closing = _replay([Lot(base, 0.0, "", _SOURCE_UNKNOWN)] if base else [], past, recorded)
+        lots = _replay(closing, today)
+    except LedgerError:
+        # 조회 기간 이전 임의 보유를 지정한 매도도 실제 매수 기록부터 복구해야 한다.
+        if base > 0:
+            return _from_cached_history(history, ticker, quantity, past, today, base)
+        raise
     _require_held(lots, quantity)
     unknown = sum(lot.shares for lot in lots if lot.source == _SOURCE_UNKNOWN)
     if unknown:
-        raise LedgerError(
-            f"최근 {LOOKBACK_DAYS}일보다 먼저 산 {unknown:,}주가 남아 있어 그 회차의 체결가를 알 수 없습니다 — "
-            "그 주식이 팔리거나 전량 매도한 뒤부터 회차를 셉니다."
-        )
+        return _from_cached_history(history, ticker, quantity, past, today, base)
+    return recorded + today, closing
+
+
+def _from_cached_history(
+    history: _History, ticker: str, quantity: int, past: list[Trade], today: list[Trade], opening: int
+) -> tuple[list[Trade], list[Lot]]:
+    """저장 캐시만 연속으로 거슬러 잔고가 0인 출발점을 찾는다. 누락 일자를 건너뛰지 않는다."""
+    country = account_country(history.account_id)
+    day = history.today - timedelta(days=LOOKBACK_DAYS + 1)
+    while True:
+        if _skips_weekend(country, day):
+            day -= timedelta(days=1)
+            continue
+        key = f"{history.account_id}:{day:%Y%m%d}"
+        cached = _cache().find_one({"_id": key})
+        if cached is None:
+            start = day + timedelta(days=1)
+            raise LedgerError(
+                f"보유 회차를 복구할 체결 이력이 부족합니다 — 검증 기간 {start}~{history.today}, "
+                f"시작 전 보유 {opening:,}주, 누락된 체결 일자 {day}. 과거 체결 이력을 확인해주세요."
+            )
+        earlier = _day_trades(cached["rows"], ticker, day, history.sources)
+        for index in range(len(earlier) - 1, -1, -1):
+            trade = earlier[index]
+            opening += -trade.shares if trade.buy else trade.shares
+            if opening < 0:
+                raise LedgerError(f"{day} 체결 이력의 수량이 증권사 잔고 {quantity:,}주와 맞지 않습니다.")
+            if opening == 0:
+                known = [*earlier[index:], *past]
+                return _replay_known_history(known, today, quantity)
+        past = [*earlier, *past]
+        day -= timedelta(days=1)
+
+
+def _replay_known_history(past: list[Trade], today: list[Trade], quantity: int) -> tuple[list[Trade], list[Lot]]:
+    """빈 보유부터 재생한 결과가 현재 잔고와 일치할 때만 기준점 후보를 반환한다."""
+    recorded: list[Trade] = []
+    closing = _replay([], past, recorded)
+    lots = _replay(closing, today)
+    _require_held(lots, quantity)
+    if any(not isfinite(lot.price) or lot.price <= 0 for lot in [*closing, *lots]):
+        raise LedgerError("남은 보유의 매수 체결가가 유효하지 않아 회차 원장을 복구하지 못했습니다.")
     return recorded + today, closing
 
 
