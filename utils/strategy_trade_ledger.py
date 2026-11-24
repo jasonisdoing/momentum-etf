@@ -222,15 +222,24 @@ def recent_trades(
 REGULAR_SELL = "regular"
 
 
+@dataclass
+class TradeLayout:
+    """원장 재생으로 확인한 매도 대상·매수 회차·현재 남은 매수 로트."""
+
+    sold_lots: list[list[tuple[int | None, bool, int]]]
+    buy_rounds: dict[int, int]
+    held_buys: list[tuple[int | None, Lot]]
+
+
 def _replay(
     lots: list[Lot],
     trades: list[Trade],
     recorded: list[Trade] | None = None,
-    pairs: list[list[tuple[int | None, bool, int]]] | None = None,
+    layout: TradeLayout | None = None,
 ) -> list[Lot]:
     """실제 체결을 순서대로 반영한다. 수동 매도는 가장 최근 임의 매수부터 차감한다.
 
-    ``pairs`` 를 주면 체결마다 차감한 로트의 (산 체결의 ``trades`` 순번 — 처음 받은 로트면 None, 임의 로트 여부, 수량)를 담는다.
+    ``layout`` 을 주면 체결 연결과 회차를 같은 재생 과정에서 수집한다. 초기 보유의 회차 수는 추정하지 않는다.
     """
     lots = list(lots)
     # 로트마다 그 로트를 만든 매수 체결의 순번 — 처음 받은 로트는 None. `lots` 와 같은 순서로 움직인다.
@@ -247,6 +256,8 @@ def _replay(
                 arbitrary_shares = trade.shares
             lots.append(Lot(trade.shares, trade.price, trade.day, trade.source, arbitrary_id))
             origins.append(index)
+            if layout is not None and arbitrary_id is None:
+                layout.buy_rounds[index] = sum(lot.arbitrary_id is None for lot in lots)
         remaining = 0 if trade.buy else trade.shares
         realized: float | None = None if trade.buy else 0.0
         while remaining > 0:
@@ -275,19 +286,23 @@ def _replay(
             remaining -= take
         if recorded is not None:
             recorded.append(replace(trade, arbitrary_shares=arbitrary_shares, realized=realized))
-        if pairs is not None:
-            pairs.append(taken)
+        if layout is not None:
+            layout.sold_lots.append(taken)
+    if layout is not None:
+        layout.held_buys = [
+            (origin, lot) for origin, lot in zip(origins, lots, strict=True) if lot.arbitrary_id is None
+        ]
     return lots
 
 
-def trade_pairs(trades: list[Trade], opening: int) -> list[list[tuple[int | None, bool, int]]]:
-    """체결마다 차감한 매수 — (``trades`` 안 매수 순번, 목록 이전에 산 것이면 None, 임의 로트 여부, 수량). 매수는 빈 목록.
+def trade_layout(trades: list[Trade], opening: int) -> TradeLayout:
+    """체결 연결·회차·남은 매수를 원장과 같은 재생으로 확인한다.
 
-    원장과 같은 `_replay` 로 정한다. ``opening`` 은 목록 처음 체결 직전 보유 수량이다(체결가 모름 로트로 둔다).
+    ``opening`` 은 목록 처음 체결 직전 보유 수량이다. 이 기초분이 있으면 매수 회차는 완전한 사이클부터만 사용한다.
     """
-    pairs: list[list[tuple[int | None, bool, int]]] = []
-    _replay([Lot(opening, 0.0, "", _SOURCE_UNKNOWN)] if opening else [], trades, None, pairs)
-    return pairs
+    layout = TradeLayout([], {}, [])
+    _replay([Lot(opening, 0.0, "", _SOURCE_UNKNOWN)] if opening else [], trades, None, layout)
+    return layout
 
 
 def _anchor_lots(rows: list[dict[str, Any]]) -> list[Lot]:

@@ -1553,3 +1553,120 @@ class OrderNotificationIsolationTest(TestCase):
 
 if __name__ == "__main__":
     main()
+
+
+class TradeHistoryRoundPlacementTest(TestCase):
+    """이력의 매수·매도 연결과 원장 회차가 같은 행을 가리키는지 검증한다."""
+
+    def attach(self, trades, initial=()):
+        recorded = []
+        lots = ledger._replay(list(initial), trades, recorded)
+        snapshot = ledger.Ledger(
+            quantity=sum(lot.shares for lot in lots),
+            lots=tuple(lots),
+            trades=tuple(recorded),
+            manual_orders=(),
+            computed_at="2026-11-25T00:25:00+09:00",
+            country="us",
+            market_date="2026-11-24",
+            average_price=0,
+        )
+        regular = [lot for lot in lots if lot.arbitrary_id is None]
+        positions = trade_service.ladder.ladder_positions([lot.price for lot in regular], 10)
+        rows = [
+            {"round": number, "position": position, "held": True, "fill_price": lot.price}
+            for number, (position, lot) in enumerate(zip(positions, regular, strict=True), start=1)
+        ]
+        rows.extend(
+            {"round": number, "position": (positions[-1] if positions else 0) + number - len(regular), "held": False}
+            for number in range(len(regular) + 1, 11)
+        )
+        view = {
+            "ticker": "SOXL",
+            "rounds": rows,
+            "config": {"trigger_pct": 10},
+            "instrument_kind": "etf",
+            "country": "us",
+            "index": {"close": 32},
+        }
+        with patch.object(trade_service, "_day_change_pcts", return_value={}):
+            trade_service._attach_trade_history(view, snapshot, {}, [])
+        return view, snapshot
+
+    @staticmethod
+    def buy(price, shares=5, day="2026-11-24"):
+        return ledger.Trade(day, True, shares, price, ledger.SOURCE_AUTO, None)
+
+    @staticmethod
+    def sell(price, shares, day="2026-11-24"):
+        return ledger.Trade(day, False, shares, price, ledger.SOURCE_AUTO, None, ledger.REGULAR_SELL)
+
+    @staticmethod
+    def positions_for(view, side, pair):
+        return [
+            position
+            for position, days in view["trades_by_position"].items()
+            for badges in days.values()
+            for badge in badges
+            if badge["side"] == side and pair in badge["pairs"]
+        ]
+
+    def test_soxl_buy_15_and_16_stay_on_round_7_and_8(self):
+        past = [
+            event for _ in range(8) for event in (self.buy(100, day="2026-11-02"), self.sell(110, 5, day="2026-11-02"))
+        ]
+        trades = past + [self.buy(price) for price in (68.62, 63.89, 55.97, 53.72, 46.59, 44.32, 39.535, 35.33)]
+        view, snapshot = self.attach(trades)
+        self.assertEqual(self.positions_for(view, "buy", 15), [7])
+        self.assertEqual(self.positions_for(view, "buy", 16), [8])
+        self.assertEqual(snapshot.quantity, 40)
+        self.assertAlmostEqual(view["history_summary"]["realized"], 400)
+
+    def test_partial_multi_round_sell_and_rebuy_follow_their_buy_rounds(self):
+        trades = [self.buy(price) for price in (100, 95, 90)]
+        trades += [self.sell(105, 6), self.buy(89)]
+        view, snapshot = self.attach(trades)
+        self.assertEqual(self.positions_for(view, "buy", 2), [2])
+        self.assertEqual(self.positions_for(view, "buy", 3), [3])
+        self.assertEqual(self.positions_for(view, "sell", 2), [2])
+        self.assertEqual(self.positions_for(view, "sell", 3), [3])
+        self.assertEqual(self.positions_for(view, "buy", 4), [3])
+        self.assertEqual(snapshot.quantity, 14)
+        self.assertAlmostEqual(view["history_summary"]["realized"], 85)
+
+    def test_round_with_price_gap_uses_its_display_position(self):
+        view, _ = self.attach([self.buy(price) for price in (100, 89, 60)])
+        position = next(row["position"] for row in view["rounds"] if row["round"] == 3)
+        self.assertEqual(position, 6)
+        self.assertEqual(self.positions_for(view, "buy", 3), [position])
+
+    def test_current_holdings_link_even_when_cycle_starts_before_history(self):
+        initial = [ledger.Lot(5, price, "2026-09-01", ledger.SOURCE_MANUAL) for price in (100, 96)]
+        view, _ = self.attach([self.buy(90)], initial)
+        self.assertEqual(self.positions_for(view, "buy", 1), [3])
+
+    def test_old_cycle_and_arbitrary_trades_keep_price_positions(self):
+        trades = [self.buy(200), self.buy(180), self.sell(190, 10), self.buy(100), self.buy(95), self.buy(105)]
+        view, _ = self.attach(trades)
+        self.assertEqual(self.positions_for(view, "buy", 2), [trade_service.ladder.ladder_position(180, 100, 10)])
+        self.assertEqual(self.positions_for(view, "buy", 4), [2])
+        self.assertEqual(
+            self.positions_for(view, "arbitrary_buy", 5), [trade_service.ladder.ladder_position(105, 100, 10)]
+        )
+
+    def test_paired_orders_use_us_order_date_after_korean_midnight(self):
+        trades = [self.sell(100, 5), self.buy(99)]
+        records = [
+            {
+                "country": "us",
+                "created_at": "2026-11-25T00:05:00+09:00",
+                "order_no": str(index + 1),
+                "side": "buy" if trade.buy else "sell",
+                "filled_quantity": 5,
+                "average_fill_price": trade.price,
+                "pair_id": "pair",
+                "round": 7,
+            }
+            for index, trade in enumerate(trades)
+        ]
+        self.assertEqual(trade_service._paired_trade_rounds(trades, records), {0: 7, 1: 7})

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -32,13 +33,14 @@ from utils.strategy_trade_ledger import (
     Ledger,
     LedgerError,
     Trade,
+    TradeLayout,
     forget_ledgers,
     history_start,
     read_cached_trade_days,
     read_ledgers,
     recent_trades,
     refresh_ledgers,
-    trade_pairs,
+    trade_layout,
 )
 from utils.strategy_trade_market import krw_rate
 from utils.strategy_trade_signal_lock import settings_signal_lock, signal_lock
@@ -592,10 +594,12 @@ def _market_now(country: ladder.Country, now: datetime | None) -> datetime:
 
 def _paired_trade_rounds(trades: list[Trade], orders: list[dict[str, Any]]) -> dict[int, int]:
     """같은 날 매도·재매수가 모두 확인된 주문 쌍의 체결 인덱스를 회차에 연결한다."""
+    from utils.strategy_trade_orders import _order_date
+
     by_order = {}
     by_fill = defaultdict(list)
     for order in orders:
-        day = order["created_at"][:10]
+        day = datetime.strptime(_order_date(order), "%Y%m%d").date().isoformat()
         buy = order["side"] == "buy"
         by_order[(day, str(int(order["order_no"])), buy)] = order
         by_fill[(day, buy, order.get("filled_quantity"), order.get("average_fill_price"))].append(order)
@@ -649,8 +653,8 @@ def _attach_trade_history(
     보여 주는 범위: 최근 체결 전부(`recent_trades` — 달력 `LOOKBACK_DAYS`일)이고, 그 안에서 보유가 모두 빈
     날짜(``cycle_end_days``)에 경계선을 긋는다. ``trades_by_position`` = {위치: {날짜: [뱃지, …]}}(`_trade_badges`).
     위치 기준(`position_prices`)은 지금 1호 체결가, 보유가 없으면 마지막 사이클의 1호 체결가다. 지난 사이클의 체결은
-    회차가 아니라 체결가에 가장 가까운 칸에 놓인다(1호보다 비싸면 0 이하 위치). 같은 날 체결된 매도·재매수 주문 쌍은
-    지금 사이클 안에서만 해당 회차의 칸에 함께 표시한다. 기준이 될 1호 체결이 없으면 비운다.
+    회차가 아니라 체결가에 가장 가까운 칸에 놓인다(1호보다 비싸면 0 이하 위치). 현재 사이클은 원장으로 확인한
+    회차에 배치하고, 여러 회차를 판 체결은 대상 회차별로 나눈다. 기준이 될 1호 체결이 없으면 비운다.
     """
     trades: dict[int, dict[str, list[dict[str, Any]]]] = {}
     view["trades_by_position"] = trades
@@ -689,7 +693,9 @@ def _attach_trade_history(
     }
     round_positions = {row["round"]: row["position"] for row in view["rounds"]}
     opening = ledger.quantity - sum(trade.shares if trade.buy else -trade.shares for trade in history)
-    sold_lots = trade_pairs(history, opening)
+    layout = trade_layout(history, opening)
+    sold_lots = layout.sold_lots
+    buy_positions = _history_buy_positions(view, ledger, layout, cycle_start)
     # 짝 번호 — 매수에 체결 순서대로 1부터. 그 매수를 판 매도가 같은 번호를 쓴다.
     pair_numbers = {
         index: number
@@ -699,9 +705,10 @@ def _attach_trade_history(
         position = round_positions.get(paired_rounds.get(index))
         if position is None:
             position = ladder.ladder_position(trade.price, base_price, trigger_pct)
-        trades.setdefault(position, {}).setdefault(trade.day, []).extend(
-            _trade_badges(trade, pair_numbers.get(index), sold_lots[index], pair_numbers)
-        )
+        for target, badge in _positioned_trade_badges(
+            index, trade, position, buy_positions, sold_lots[index], pair_numbers
+        ):
+            trades.setdefault(target, {}).setdefault(trade.day, []).append(badge)
     view["history_summary"] = _history_summary(view, ledger, history, sold_lots)
     view["trade_day_change_pcts"] = _day_change_pcts(view, {day for by_day in trades.values() for day in by_day})
     # 위치 가격 — 회차·매매가 있는 위치 범위 전체(빈 칸 포함). 1호 체결가 × (1 − 간격%)^(k−1) 를 호가로 맞춘 값.
@@ -716,6 +723,50 @@ def _attach_trade_history(
     }
 
 
+def _history_buy_positions(
+    view: dict[str, Any], ledger: Ledger, layout: TradeLayout, cycle_start: int | None
+) -> dict[int, int]:
+    """현재 사이클의 실제 회차와 표시 위치를 연결한다."""
+    round_positions = {row["round"]: row["position"] for row in view["rounds"]}
+    current = (
+        {index: number for index, number in layout.buy_rounds.items() if index >= cycle_start}
+        if cycle_start is not None and any(row["held"] for row in view["rounds"])
+        else {}
+    )
+    # 오래된 기초 보유의 회차 수는 추정하지 않고, 남은 로트가 원장과 일치할 때 현재 회차에 연결한다.
+    known = [(index, lot) for index, lot in layout.held_buys if index is not None]
+    regular = [lot for lot in ledger.lots if lot.arbitrary_id is None]
+    if known and [lot for _, lot in known] == regular[-len(known) :]:
+        current.update({index: number for number, (index, _) in enumerate(known, start=len(regular) - len(known) + 1)})
+    return {index: round_positions[number] for index, number in current.items() if number in round_positions}
+
+
+def _positioned_trade_badges(
+    index: int,
+    trade: Trade,
+    position: int,
+    buy_positions: dict[int, int],
+    sold_lots: list[tuple[int | None, bool, int]],
+    pair_numbers: dict[int, int],
+) -> list[tuple[int, dict[str, Any]]]:
+    """매수는 해당 회차, 매도는 실제 차감한 매수의 회차에 표시한다."""
+    if trade.buy:
+        return [
+            (buy_positions.get(index, position), badge)
+            for badge in _trade_badges(trade, pair_numbers.get(index), sold_lots, pair_numbers)
+        ]
+    targets = defaultdict(list)
+    for origin, arbitrary, shares in sold_lots:
+        target = position if arbitrary else buy_positions.get(origin, position)
+        targets[(target, arbitrary)].append((origin, arbitrary, shares))
+    badges = []
+    for (target, arbitrary), taken in targets.items():
+        shares = sum(shares for _, _, shares in taken)
+        part = replace(trade, shares=shares, arbitrary_shares=shares if arbitrary else 0)
+        badges.extend((target, badge) for badge in _trade_badges(part, None, taken, pair_numbers))
+    return badges
+
+
 def _history_summary(
     view: dict[str, Any],
     ledger: Ledger,
@@ -724,7 +775,7 @@ def _history_summary(
 ) -> dict[str, Any]:
     """회차 표 범위(최근 체결 전부)의 손익 요약(종목 통화) — 평가 금액·실현손익·평가손익·합계.
 
-    실현손익은 범위 안에서 사고판 몫만 — 매도를 짝 매수(`trade_pairs`) 체결가와 비교한다. 범위 이전에 산 몫은 넣지
+    실현손익은 범위 안에서 사고판 몫만 — 매도를 짝 매수(`trade_layout`) 체결가와 비교한다. 범위 이전에 산 몫은 넣지
     않는다. 평가는 지금 보유 로트(임의 매수 포함) 전체다.
     """
     close = float(view["index"]["close"])
