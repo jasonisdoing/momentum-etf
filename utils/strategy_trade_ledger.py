@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 from pymongo.errors import DuplicateKeyError
 
 from services.broker_api_service import BrokerApiError
-from services.broker_trade_service import account_country, fetch_order_balance, list_day_orders
+from services.broker_trade_service import account_country, fetch_order_balance, list_day_orders, list_order_states
 from utils.db_manager import get_db_connection
 from utils.strategy_trade_market import session_trade_date
 
@@ -92,7 +92,7 @@ class Ledger:
     lots: tuple[Lot, ...]
     #: 재생한 체결(시간순) — 기준점 또는 최근 기간부터다.
     trades: tuple[Trade, ...]
-    #: 오늘 증권사에 걸려 있는 우리 기록에 없는(수동) 미체결 주문 — 구분·가격·남은 수량.
+    #: 증권사의 활성 주문 중 활성 API 기록으로 관리되지 않는 주문 — 출처·구분·가격·남은 수량.
     manual_orders: tuple[dict[str, Any], ...]
     #: 이 원장을 계산한 시각(KST ISO) — 화면이 어느 시점 기준인지 보여 준다.
     computed_at: str
@@ -409,19 +409,30 @@ def _manual_orders(
     today_rows: list[dict[str, Any]],
     tickers: list[str],
     sources: dict[tuple[str, str], tuple[str, str | None]],
-    today: date,
+    account_id: str,
 ) -> dict[str, list[dict[str, Any]]]:
+    from utils.strategy_trade_orders import ACTIVE_STATUSES, _order_date, _orders
+
+    external = [row for row in today_rows if row["ticker"] in tickers and row["status"] in ("pending", "partial")]
+    if not external:
+        return {ticker: [] for ticker in tickers}
+    active_api = {
+        (_order_date(record), record["order_no"])
+        for record in _orders().find(
+            {"account_id": account_id, "status": {"$in": list(ACTIVE_STATUSES)}, "order_no": {"$ne": None}}
+        )
+    }
     orders: dict[str, list[dict[str, Any]]] = {ticker: [] for ticker in tickers}
-    for row in today_rows:
-        if row["ticker"] not in orders or row["status"] not in ("pending", "partial"):
-            continue
-        if (f"{today:%Y%m%d}", row["order_no"]) in sources:
+    for row in external:
+        key = (row["order_date"], row["order_no"])
+        if key in sources and key in active_api:
             continue
         orders[row["ticker"]].append(
             {
                 "side": "buy" if is_buy(row) else "sell",
                 "price": row["price"],
                 "quantity": row["unfilled_quantity"],
+                "source": "api" if key in sources else "manual",
             }
         )
     return orders
@@ -446,7 +457,9 @@ def _consistent_snapshot(account_id: str, today: date) -> tuple[dict[str, tuple[
     before = _balance(account_id)
     for _ in range(_SNAPSHOT_ATTEMPTS):
         rows = (
-            [] if _skips_weekend(account_country(account_id), today) else list_day_orders(account_id, f"{today:%Y%m%d}")
+            []
+            if _skips_weekend(account_country(account_id), today)
+            else list_order_states(account_id, f"{today:%Y%m%d}")
         )
         after = _balance(account_id)
         if after == before:
@@ -468,9 +481,10 @@ def compute_ledgers(
     country = account_country(account_id)
     today = session_trade_date(country, datetime.now(KST))
     balance, today_rows = _consistent_snapshot(account_id, today)
-    sources = order_sources(account_id, today_rows)
-    history = _History(account_id, today, _filled(today_rows), sources)
-    manual = _manual_orders(today_rows, tickers, sources, today)
+    current_day_rows = [row for row in today_rows if row["order_date"] == f"{today:%Y%m%d}"]
+    sources = order_sources(account_id, current_day_rows)
+    history = _History(account_id, today, _filled(current_day_rows), sources)
+    manual = _manual_orders(today_rows, tickers, sources, account_id)
     anchors = {doc["ticker"]: doc for doc in _anchors().find({"account_id": account_id, "ticker": {"$in": tickers}})}
     stored = {doc["ticker"]: doc for doc in _snapshots().find({"account_id": account_id, "ticker": {"$in": tickers}})}
     cutoff = (today - timedelta(days=LOOKBACK_DAYS)).isoformat()

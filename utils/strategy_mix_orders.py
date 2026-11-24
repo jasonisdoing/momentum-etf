@@ -7,7 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from services.broker_api_service import BrokerApiError, OrderUncertainError, fetch_broker_balance
-from services.broker_trade_service import account_country, account_env, list_day_orders, resolve_us_exchange
+from services.broker_trade_service import account_country, account_env, list_order_states, resolve_us_exchange
 from utils.db_manager import get_db_connection
 from utils.settings_loader import get_account_settings, get_slack_channel
 from utils.strategy_mix_notify import format_action_message
@@ -78,7 +78,7 @@ def _require_live_account(account_id: str) -> str:
 def _require_no_open_order(account_id: str, ticker: str, country: str) -> None:
     if _orders().find_one({"account_id": account_id, "ticker": ticker, "status": {"$in": list(ACTIVE_STATUSES)}}):
         raise BrokerApiError("이 종목에 이미 진행 중이거나 접수 확인이 필요한 API 주문이 있습니다.")
-    broker_orders = list_day_orders(account_id, broker_order_date(country, _now()))
+    broker_orders = list_order_states(account_id, broker_order_date(country, _now()))
     if any(row["ticker"] == ticker and row["status"] in ACTIVE_STATUSES for row in broker_orders):
         raise BrokerApiError("이 종목에 증권사 미체결 주문이 있습니다.")
 

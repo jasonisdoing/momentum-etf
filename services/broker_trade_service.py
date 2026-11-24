@@ -149,6 +149,48 @@ def list_day_orders(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:
     return merge_amendments(rows)
 
 
+def list_order_states(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:
+    """체결 이력과 실제 주문 상태를 공통 경로에서 대조한다. 불명확하면 주문을 허용하지 않는다."""
+    from services import meritz_api_service
+
+    rows = [{**row, "order_date": yyyymmdd} for row in list_day_orders(account_id, yyyymmdd)]
+    doc = _account_doc(account_id)
+    if _provider(doc) == MERITZ_PROVIDER and _is_us(doc):
+        current = merge_amendments(meritz_api_service.us_current_order_rows(account_id))
+        by_key = {(row["order_date"], row["order_no"]): row for row in current}
+        result = []
+        seen = set()
+        for row in rows:
+            key = (row["order_date"], row["order_no"])
+            live = by_key.get(key)
+            if live is not None:
+                if live["filled_quantity"] < row["filled_quantity"]:
+                    raise BrokerApiError(
+                        f"{row['ticker']} 주문 {row['order_no']}의 체결 수량이 조회 간 일치하지 않습니다."
+                    )
+                result.append(live)
+                seen.add(key)
+            elif row["status"] in ("pending", "partial"):
+                raise BrokerApiError(
+                    f"{row['ticker']} 주문 {row['order_no']}의 상태 확인이 필요합니다. "
+                    "기간 내역에는 잔량이 있지만 당일 조회에서 활성 여부를 확인하지 못했습니다."
+                )
+            else:
+                result.append(row)
+        # 방금 접수되어 기간 이력에 아직 없는 활성 주문도 중복 확인에서 빠뜨리지 않는다.
+        result.extend(
+            row
+            for key, row in by_key.items()
+            if key not in seen and (row["order_date"] == yyyymmdd or row["status"] in ("pending", "partial"))
+        )
+        rows = result
+    for row in rows:
+        if row["side_label"] not in ("매수", "매도"):
+            raise BrokerApiError("증권사 주문내역의 매매 방향을 확인할 수 없습니다.")
+        row["side"] = "buy" if row["side_label"] == "매수" else "sell"
+    return rows
+
+
 def _root_order_no(row: dict[str, Any], by_no: dict[str, dict[str, Any]]) -> str | None:
     """정정이 이어진 주문의 맨 처음 원주문번호 — 원주문이 목록에 없으면 None."""
     current = row

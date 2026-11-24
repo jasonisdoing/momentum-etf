@@ -75,7 +75,7 @@ class MixOrderTest(TestCase):
             patch.object(order_store, "is_instrument_trading_time", return_value=True),
             patch.object(order_store, "_order_venue", return_value="KRX"),
             patch.object(mix, "fetch_broker_balance", return_value=self.balance),
-            patch.object(mix, "list_day_orders", return_value=[]),
+            patch.object(mix, "list_order_states", return_value=[]),
             patch.object(mix, "resolve_ticker_meta", return_value={"is_etf": True, "name": "종목"}),
             patch.object(mix, "resolve_order_quote", return_value=("KRX", "매도 1호가", 100, None)),
         ]
@@ -228,7 +228,7 @@ class MixOrderTest(TestCase):
         self.assertEqual(submit.call_count, 1)
 
     def test_partial_fill_and_out_of_sync_balance_are_blocked(self):
-        with patch.object(mix, "list_day_orders", return_value=[{"ticker": "ETF", "status": "partial"}]):
+        with patch.object(mix, "list_order_states", return_value=[{"ticker": "ETF", "status": "partial"}]):
             with self.assertRaisesRegex(BrokerApiError, "미체결"):
                 mix.resolve_mix_order(self.request, "root")
         self.balance["holdings"][0]["quantity"] = 120
@@ -301,7 +301,7 @@ class MixOrderTest(TestCase):
         ]
         with (
             patch.object(order_store, "_orders", return_value=self.orders),
-            patch.object(order_store, "list_day_orders", return_value=[]),
+            patch.object(order_store, "list_order_states", return_value=[]),
             patch.object(
                 order_store, "_now", return_value=datetime(2025, 1, 3, 10, 0, 5, tzinfo=ZoneInfo("Asia/Seoul"))
             ),
@@ -319,3 +319,139 @@ class MixOrderTest(TestCase):
             slack._place(target)
         self.assertIn("접수 여부", send.call_args.args[0])
         self.assertTrue(all(block["type"] != "actions" for block in update.call_args.args[1]))
+
+
+class OverseasOrderStateTest(TestCase):
+    """실제 활성 여부가 신호 차단과 주문 결과에 일관되게 반영되는지 검증한다."""
+
+    def setUp(self):
+        from services import broker_trade_service as broker
+        from services import meritz_api_service as meritz
+
+        self.broker, self.meritz = broker, meritz
+        self.raw = {
+            "oder_date": "20261124",
+            "oder_no": 776692,
+            "orgl_oder_no": 0,
+            "iscd": "DIVB.AX",
+            "iscd_name": "DIVB",
+            "seln_byov_clcd": "2",
+            "odqt": 3,
+            "cntg_qty": 0,
+            "ncnt_qty": 0,
+            "oder_able_qty": 0,
+            "cncl_cnfr_qty": 0,
+            "ovrs_stck_oder_stat_cls_code": "0",
+            "ovrs_stck_oder_prc": 67.91,
+            "cntg_crnc_prc": 0,
+            "oder_rctf_cncl_cls_code": "0",
+        }
+        self.history = {
+            **meritz._us_today_order_row(self.raw),
+            "status": "pending",
+            "unfilled_quantity": 3,
+            "current_order_no": "776692",
+        }
+        self.today = [self.raw]
+        self.store = Mock()
+        self.store.find_one.return_value = None
+        self.store.find.return_value = []
+        patches = [
+            patch.object(
+                broker, "_account_doc", return_value={"country_code": "us", "broker_api": {"provider": "MERITZ"}}
+            ),
+            patch.object(broker, "list_day_orders", side_effect=lambda account, day: [dict(self.history)]),
+            patch.object(meritz, "_get", side_effect=lambda *args: {"rsp_cd": "0000", "data": self.today}),
+            patch.object(mix, "_orders", return_value=self.store),
+            patch.object(mix, "list_order_states", side_effect=broker.list_order_states),
+            patch.object(mix, "broker_order_date", return_value="20261124"),
+        ]
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+
+    def test_confirmed_inactive_day_order_allows_new_signal(self):
+        mix._require_no_open_order("a1", "DIVB", "us")
+        row = self.broker.list_order_states("a1", "20261124")[0]
+        self.assertEqual((row["status"], row["unfilled_quantity"]), ("expired", 0))
+
+    def test_live_or_partially_filled_order_blocks_new_signal(self):
+        for filled, remaining in ((0, 3), (1, 2)):
+            with self.subTest(filled=filled):
+                self.raw.update(cntg_qty=filled, ncnt_qty=remaining, oder_able_qty=remaining)
+                with self.assertRaisesRegex(BrokerApiError, "미체결"):
+                    mix._require_no_open_order("a1", "DIVB", "us")
+
+    def test_partial_expiry_preserves_fills(self):
+        self.raw.update(cntg_qty=1, cntg_crnc_prc=67.91)
+        row = self.broker.list_order_states("a1", "20261124")[0]
+        self.assertEqual((row["status"], row["filled_quantity"], row["average_fill_price"]), ("expired", 1, 67.91))
+        mix._require_no_open_order("a1", "DIVB", "us")
+
+    def test_missing_or_failed_current_query_does_not_assume_expiry(self):
+        self.today.clear()
+        with self.assertRaisesRegex(BrokerApiError, "상태 확인"):
+            mix._require_no_open_order("a1", "DIVB", "us")
+        with patch.object(self.meritz, "_get", side_effect=BrokerApiError("연결 실패")):
+            with self.assertRaisesRegex(BrokerApiError, "연결 실패"):
+                mix._require_no_open_order("a1", "DIVB", "us")
+
+    def test_inconsistent_quantities_do_not_allow_new_signal(self):
+        self.raw["oder_able_qty"] = 3
+        with self.assertRaisesRegex(BrokerApiError, "서로 다릅니다"):
+            mix._require_no_open_order("a1", "DIVB", "us")
+        self.raw["oder_able_qty"] = 0
+        self.history["filled_quantity"] = 1
+        with self.assertRaisesRegex(BrokerApiError, "체결 수량"):
+            mix._require_no_open_order("a1", "DIVB", "us")
+
+    def test_amended_active_order_blocks_original_order(self):
+        self.today.append({**self.raw, "oder_no": 776693, "orgl_oder_no": 776692, "ncnt_qty": 3, "oder_able_qty": 3})
+        row = self.broker.list_order_states("a1", "20261124")[0]
+        self.assertEqual((row["order_no"], row["current_order_no"], row["status"]), ("776692", "776693", "pending"))
+        with self.assertRaisesRegex(BrokerApiError, "미체결"):
+            mix._require_no_open_order("a1", "DIVB", "us")
+
+    def test_new_active_order_missing_from_history_is_still_blocked(self):
+        self.today.append({**self.raw, "oder_no": 776700, "ncnt_qty": 3, "oder_able_qty": 3})
+        with self.assertRaisesRegex(BrokerApiError, "미체결"):
+            mix._require_no_open_order("a1", "DIVB", "us")
+
+    def test_same_order_number_on_another_date_does_not_prove_expiry(self):
+        self.raw["oder_date"] = "20261125"
+        with self.assertRaisesRegex(BrokerApiError, "상태 확인"):
+            mix._require_no_open_order("a1", "DIVB", "us")
+
+    def test_order_refresh_uses_actual_state_and_keeps_live_order_after_session(self):
+        self.store.find.return_value = [
+            {
+                "_id": "record",
+                "account_id": "a1",
+                "country": "us",
+                "order_no": "776692",
+                "created_at": "2026-11-24T12:01:17+09:00",
+                "status": "pending",
+            }
+        ]
+        with (
+            patch.object(order_store, "_orders", return_value=self.store),
+            patch.object(order_store, "list_order_states", side_effect=self.broker.list_order_states),
+            patch.object(order_store, "is_order_open", side_effect=AssertionError("시각만으로 만료시키면 안 된다")),
+        ):
+            order_store.refresh_account_orders("a1")
+            self.assertEqual(self.store.update_one.call_args.args[1]["$set"]["status"], "expired")
+            self.raw.update(ncnt_qty=3, oder_able_qty=3)
+            order_store.refresh_account_orders("a1")
+            self.assertEqual(self.store.update_one.call_args.args[1]["$set"]["status"], "pending")
+
+    def test_incorrectly_expired_api_order_still_blocks_trade_strategy(self):
+        from utils import strategy_trade_ledger as ledger
+
+        self.raw.update(ncnt_qty=3, oder_able_qty=3)
+        rows = self.broker.list_order_states("a1", "20261124")
+        with patch.object(order_store, "_orders", return_value=self.store):
+            result = ledger._manual_orders(rows, ["DIVB"], {("20261124", "776692"): ("manual_slack", None)}, "a1")
+        self.assertEqual(result["DIVB"][0]["source"], "api")
+        strategy = {"manual_orders": result["DIVB"], "label": "DIVB"}
+        with self.assertRaisesRegex(BrokerApiError, "미체결"):
+            order_store._require_no_manual_order(strategy, "buy")

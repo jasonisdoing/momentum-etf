@@ -121,8 +121,8 @@ export type RoundRow = {
   // 활성 슬랙 신호와 아직 끝나지 않은 주문의 방향.
   slack_signals: SlackSignal[];
   order_sides: Array<"buy" | "sell">;
-  // 증권사 앱(MTS)에 걸려 있는 미체결 수동 주문 — 슬랙 주문을 막는다.
-  manual_orders: Array<{ side: "buy" | "sell"; price: number; quantity: number }>;
+  // 활성 API 기록에 없는 증권사 미체결 주문도 새 슬랙 주문을 막는다.
+  manual_orders: Array<{ side: "buy" | "sell"; price: number; quantity: number; source?: "api" | "manual" }>;
   is_next: boolean;
 };
 
@@ -474,7 +474,7 @@ function RoundStatus({
     )),
     ...row.manual_orders.map((order, index) => (
       <span key={`manual-${index}`} title={`${formatCurrencyPrice(order.price, currency)} · ${order.quantity.toLocaleString()}주`}>
-        <StatusBadge color="var(--tblr-green, #2fb344)" compact={compact}>수동{SIDE_WORDS[order.side]}주문</StatusBadge>
+        <StatusBadge color="var(--tblr-green, #2fb344)" compact={compact}>{order.source === "api" ? "" : "수동"}{SIDE_WORDS[order.side]}주문</StatusBadge>
       </span>
     )),
   ];

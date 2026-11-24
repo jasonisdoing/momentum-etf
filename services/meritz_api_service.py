@@ -814,6 +814,7 @@ OVERSEAS_CANCEL_PATH = "/trading/v1/overseas/orders/cancel"
 OVERSEAS_ORDERBOOK_PATH = "/market/v1/overseas/orderbook"
 OVERSEAS_PRICE_PATH = "/market/v1/overseas/prices"
 OVERSEAS_ORDER_HISTORY_PATH = "/trading/v1/overseas/orders/history"
+OVERSEAS_TODAY_ORDERS_PATH = "/trading/v1/overseas/orders/today"
 #: 시세 거래소 코드 → 주문 거래소 벤더 번호.
 US_EXCHANGE_VENDORS = {"OQ": "0537", "NY": "0321", "AX": "0066"}
 _OVERSEAS_MARKET = "OV"
@@ -951,10 +952,7 @@ def _us_row_from_history(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _us_order_rows(account_id: str, day: date) -> list[dict[str, Any]]:
-    """그날의 주문 행(공통 중간형) — 미국 현지 날짜 기준이고 오늘도 기간 조회로 읽는다.
-
-    당일 조회(`/overseas/orders/today`)는 데이장 주문이 빠져 0건으로 나오는 때가 있어 쓰지 않는다.
-    """
+    """체결 이력의 공통 중간형. 주문의 현재 활성 여부는 당일 조회와 별도로 대조한다."""
     day_text = _us_order_date(day)
     raw = _get_paged(
         account_id,
@@ -972,6 +970,8 @@ def _us_status(row: dict[str, Any], canceled: float) -> str:
         return "filled"
     if canceled > 0:
         return "canceled"
+    if row["state"] == "3":
+        return "expired"
     if row["filled"] > 0:
         return "partial"
     return "pending"
@@ -998,6 +998,7 @@ def us_day_order_rows(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:
             {
                 "order_no": str(row["order_no"]),
                 "origin_order_no": str(row["origin_no"]),
+                "order_date": row["date"],
                 "ticker": row["symbol"],
                 "name": row["name"],
                 "side_label": _SIDE_LABELS[row["side"]],
@@ -1011,6 +1012,63 @@ def us_day_order_rows(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:
             }
         )
     return result
+
+
+def _us_today_order_row(row: dict[str, Any]) -> dict[str, Any]:
+    """당일 조회의 실제 미체결·정정취소 가능 수량으로만 활성 여부를 정한다."""
+    ticker = str(row["iscd"]).split(".")[0].strip()
+    order_no = str(int(row["oder_no"]))
+    quantity, filled = float(row["odqt"]), float(row["cntg_qty"])
+    remaining, amendable, canceled = float(row["ncnt_qty"]), float(row["oder_able_qty"]), float(row["cncl_cnfr_qty"])
+    state, side = str(row["ovrs_stck_oder_stat_cls_code"]), str(row["seln_byov_clcd"])
+    if side not in _SIDE_LABELS or state not in {"0", "1", "2", "3", "4"}:
+        raise BrokerApiError(f"{ticker} 주문 {order_no}의 상태 확인이 필요합니다: 알 수 없는 증권사 상태 코드입니다.")
+    values = (quantity, filled, remaining, amendable, canceled)
+    if (
+        quantity <= 0
+        or any(not isfinite(value) or value < 0 for value in values)
+        or filled + remaining + canceled > quantity
+    ):
+        raise BrokerApiError(f"{ticker} 주문 {order_no}의 상태 확인이 필요합니다: 증권사 잔량이 일치하지 않습니다.")
+    if state in _OVERSEAS_REJECTED_STATES:
+        status = "rejected"
+    elif filled == quantity and quantity > 0:
+        status = "filled"
+    elif remaining > 0:
+        if state == "3":
+            raise BrokerApiError(f"{ticker} 주문 {order_no}의 자동취소 상태와 미체결 수량이 서로 다릅니다.")
+        status = "partial" if filled > 0 else "pending"
+    elif amendable > 0:
+        raise BrokerApiError(f"{ticker} 주문 {order_no}의 미체결 수량과 정정·취소 가능 수량이 서로 다릅니다.")
+    else:
+        status = "canceled" if canceled > 0 else "expired"
+    return {
+        "order_no": order_no,
+        "origin_order_no": str(int(row["orgl_oder_no"])),
+        "order_date": str(row["oder_date"]),
+        "ticker": ticker,
+        "name": str(row["iscd_name"]),
+        "side_label": _SIDE_LABELS[side],
+        "quantity": quantity,
+        "price": float(row["ovrs_stck_oder_prc"]),
+        "filled_quantity": filled,
+        "unfilled_quantity": remaining,
+        "canceled_quantity": canceled,
+        "average_fill_price": float(row["cntg_crnc_prc"]),
+        "status": status,
+    }
+
+
+def us_current_order_rows(account_id: str) -> list[dict[str, Any]]:
+    """기간 이력과 구분되는 실제 당일 주문 상태. 빈 조회와 조회 실패를 섞지 않는다."""
+    data = _get(account_id, OVERSEAS_TODAY_ORDERS_PATH, {"cntg_cls_code": "0", "seln_byov_clcd": "0"})
+    if str(data["rsp_cd"]) == "5820":
+        return []
+    if not isinstance(data.get("data"), list):
+        raise BrokerApiError("해외 당일 주문 조회 응답에 주문 목록이 없습니다. 상태 확인이 필요합니다.")
+    return [
+        _us_today_order_row(row) for row in data["data"] if str(row["oder_rctf_cncl_cls_code"]) != _OVERSEAS_ROW_CANCEL
+    ]
 
 
 def modify_us_order(account_id: str, order_no: str, ticker: str, quantity: int, price: float) -> dict[str, str]:

@@ -1458,11 +1458,19 @@ class OrderNotificationIsolationTest(TestCase):
         def broker(account, day):
             if account == "a1":
                 raise meritz.MeritzTokenExpiredError("token expired")
-            return [{"order_no": "a2", "status": "filled", "filled_quantity": 1, "average_fill_price": 100}]
+            return [
+                {
+                    "order_date": day,
+                    "order_no": "a2",
+                    "status": "filled",
+                    "filled_quantity": 1,
+                    "average_fill_price": 100,
+                }
+            ]
 
         with (
             patch.object(orders, "_orders", return_value=store),
-            patch.object(orders, "list_day_orders", side_effect=broker),
+            patch.object(orders, "list_order_states", side_effect=broker),
             patch.object(orders, "_broker_status", side_effect=lambda record, state: state),
         ):
             failures = orders.refresh_slack_order_accounts()

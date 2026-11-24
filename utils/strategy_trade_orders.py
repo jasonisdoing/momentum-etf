@@ -30,6 +30,7 @@ from services.broker_trade_service import (
     cancel_order,
     fetch_best_quote,
     list_day_orders,
+    list_order_states,
     place_limit_order,
 )
 from services.broker_trade_service import (
@@ -199,7 +200,7 @@ def _require_no_manual_order(strategy: dict[str, Any], side: str) -> None:
         word = "매도" if side == "sell" else "매수"
         detail = ", ".join(f"{order['price']:,.0f}원 {order['quantity']:,}주" for order in found)
         raise BrokerApiError(
-            f"{strategy['label']} 에 증권사 앱에서 낸 미체결 {word} 주문이 있어 주문할 수 없습니다({detail}) — 먼저 정리하세요."
+            f"{strategy['label']}에 증권사 미체결 {word} 주문이 있어 주문할 수 없습니다({detail}) — 먼저 정리하세요."
         )
 
 
@@ -688,7 +689,7 @@ def read_trade_history_orders(account_id: str, start: date, as_of: date) -> list
 
 def _current_order_no(record: dict[str, Any]) -> str:
     """취소 요청을 보낼 주문번호 — 증권사 앱에서 정정했으면 정정으로 새로 생긴 번호다."""
-    for row in list_day_orders(record["account_id"], _order_date(record)):
+    for row in list_order_states(record["account_id"], _order_date(record)):
         if row["order_no"] == record["order_no"]:
             return row["current_order_no"]
     raise BrokerApiError("증권사 주문내역에서 이 주문번호를 찾지 못했습니다.")
@@ -773,8 +774,9 @@ def _order_date(record: dict[str, Any]) -> str:
 
 
 def _broker_status(record: dict[str, Any], broker_status: str) -> str:
-    """증권사 상태를 기록 상태로 옮긴다 — 미체결 주문은 당일(세션) 주문이므로 접수한 세션 날짜가 지났거나 그 거래소의
-    거래 시간이 끝났으면 만료로 본다(국장 KRX 는 정규장, NXT 는 애프터마켓 마감까지, 미장은 종목 종류의 거래 시간 밖)."""
+    """미국은 실제 주문 상태 조회를 따른다. 국내는 접수 세션·거래소 마감도 확인한다."""
+    if record["country"] == "us":
+        return broker_status
     country, now = record["country"], _now()
     venue_open = is_order_open(country, record["venue"], record["instrument_kind"], now=now)
     placed = session_trade_date(country, datetime.fromisoformat(record["created_at"]))
@@ -791,8 +793,8 @@ def refresh_account_orders(account_id: str) -> None:
         return
     broker_rows: dict[tuple[str, str], dict[str, Any]] = {}
     for order_day in sorted({_order_date(record) for record in active}):
-        for row in list_day_orders(account_id, order_day):
-            broker_rows[(order_day, row["order_no"])] = row
+        for row in list_order_states(account_id, order_day):
+            broker_rows[(row["order_date"], row["order_no"])] = row
 
     now = _now()
     assigned_order_nos: set[str] | None = None
