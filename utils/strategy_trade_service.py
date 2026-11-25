@@ -703,6 +703,7 @@ def _attach_trade_history(
         index: number
         for number, index in enumerate((index for index, trade in enumerate(history) if trade.buy), start=1)
     }
+    day_seq: dict[str, int] = defaultdict(int)
     for index, trade in enumerate(history):
         position = round_positions.get(paired_rounds.get(index))
         if position is None:
@@ -710,7 +711,9 @@ def _attach_trade_history(
         for target, badge in _positioned_trade_badges(
             index, trade, position, buy_positions, sold_lots[index], pair_numbers
         ):
-            trades.setdefault(target, {}).setdefault(trade.day, []).append(badge)
+            seq = day_seq[trade.day]
+            day_seq[trade.day] = seq + 1
+            trades.setdefault(target, {}).setdefault(trade.day, []).append({**badge, "seq": seq})
     view["history_summary"] = _history_summary(view, ledger, history, sold_lots)
     view["trade_day_change_pcts"] = _day_change_pcts(view, {day for by_day in trades.values() for day in by_day})
     # 위치 가격 — 회차·매매가 있는 위치 범위 전체(빈 칸 포함). 1호 체결가 × (1 − 간격%)^(k−1) 를 호가로 맞춘 값.
@@ -816,7 +819,15 @@ def _trade_badges(
         else:
             origins = [origin for origin, lot_arbitrary, _ in sold_lots if lot_arbitrary == arbitrary]
             pairs = list(dict.fromkeys(pair_numbers[o] for o in origins if o is not None))
-        badges.append({"side": f"arbitrary_{side}" if arbitrary else side, "pairs": pairs, "source": trade.source})
+        badges.append(
+            {
+                "side": f"arbitrary_{side}" if arbitrary else side,
+                "pairs": pairs,
+                "source": trade.source,
+                "price": trade.price,
+                "shares": shares,
+            }
+        )
     return badges
 
 

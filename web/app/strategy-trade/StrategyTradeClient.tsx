@@ -81,7 +81,7 @@ type TradeSide = "buy" | "sell" | "arbitrary_buy" | "arbitrary_sell";
 /** 회차 표의 체결 뱃지 — 짝 번호(`pairs`)는 매수는 자기 번호, 매도는 판 매수의 번호다(최근 30일 안 매수만). */
 /** 체결 출처 — 백엔드 `strategy_trade_ledger.SOURCE_*`. */
 type FillSource = "auto" | "slack" | "manual_slack" | "api" | "manual";
-type TradeBadge = { side: TradeSide; pairs: number[]; source: FillSource };
+type TradeBadge = { side: TradeSide; pairs: number[]; source: FillSource; seq?: number; price?: number; shares?: number };
 
 const FILL_LABELS = {
   buy: "매수",
@@ -499,13 +499,23 @@ const FILL_SOURCE_WORDS: Record<FillSource, string> = {
 };
 
 function DailyTradeBadges({ badges }: { badges: TradeBadge[] }) {
+  const currency = useTradeCurrency();
   return (
     <span style={{ display: "inline-flex", gap: 4, whiteSpace: "nowrap" }}>
       {badges.map((badge, idx) => (
-        <StatusBadge key={idx} color={FILL_COLORS[badge.side.endsWith("buy") ? "buy" : "sell"]}>
-          {FILL_LABELS[badge.side]}
-          {badge.pairs.join("·")} · {FILL_SOURCE_WORDS[badge.source]}
-        </StatusBadge>
+        <span
+          key={idx}
+          title={
+            badge.price != null && badge.shares != null
+              ? `${formatPrice(badge.price, currency)} · ${badge.shares.toLocaleString()}주`
+              : undefined
+          }
+        >
+          <StatusBadge color={FILL_COLORS[badge.side.endsWith("buy") ? "buy" : "sell"]}>
+            {FILL_LABELS[badge.side]}
+            {badge.pairs.join("·")} · {FILL_SOURCE_WORDS[badge.source]}
+          </StatusBadge>
+        </span>
       ))}
     </span>
   );
@@ -1577,7 +1587,21 @@ function StrategySection({
   const tradeDays = [
     ...new Set(Object.values(view.trades_by_position).flatMap((byDay) => Object.keys(byDay))),
   ].sort();
-  const columnCount = ROUND_TABLE_FIXED_WIDTHS.length + tradeDays.length;
+  // 여러 회차(행)에 걸쳐 체결이 있는 날만 체결 순서(`seq`)별 하위 열로 나눠 왼쪽→오른쪽 시간 순서를 맞춘다.
+  const dayTimeSlots = new Map<string, number[] | null>(
+    tradeDays.map((day) => {
+      const rowEntries = Object.values(view.trades_by_position).filter((byDay) => (byDay[day]?.length ?? 0) > 0);
+      if (rowEntries.length <= 1) return [day, null];
+      const seqs = [
+        ...new Set(
+          rowEntries.flatMap((byDay) => byDay[day].map((badge) => badge.seq).filter((seq): seq is number => seq != null)),
+        ),
+      ].sort((a, b) => a - b);
+      return [day, seqs.length > 1 ? seqs : null];
+    }),
+  );
+  const dayColSpan = (day: string) => dayTimeSlots.get(day)?.length ?? 1;
+  const columnCount = ROUND_TABLE_FIXED_WIDTHS.length + tradeDays.reduce((sum, day) => sum + dayColSpan(day), 0);
   const cycleEnds = new Set(view.cycle_end_days);
   // 사이클이 끝난 날 칸 오른쪽에 경계선 — 그 뒤 체결은 새 사이클이다.
   const cycleEndStyle = (day: string): React.CSSProperties =>
@@ -1681,6 +1705,7 @@ function StrategySection({
               {tradeDays.map((day) => (
                 <th
                   key={day}
+                  colSpan={dayColSpan(day)}
                   title={cycleEnds.has(day) ? `${day} · 보유가 모두 비었습니다(사이클 종료)` : day}
                   style={{
                     ...thStyle,
@@ -1702,11 +1727,36 @@ function StrategySection({
           <tbody>
             <RecentPriceRow index={index} columnCount={columnCount} kind="high" />
             {slots.map(({ position, row, trades }, rowIdx) => {
-              const tradeCells = tradeDays.map((day) => (
-                <td key={day} style={{ ...tdStyle, textAlign: "center", ...cycleEndStyle(day) }}>
-                  {trades[day] ? <DailyTradeBadges badges={trades[day]} /> : null}
-                </td>
-              ));
+              const tradeCells = tradeDays.flatMap((day) => {
+                const slotsForDay = dayTimeSlots.get(day);
+                const dayBadges = trades[day];
+                if (!slotsForDay) {
+                  return (
+                    <td key={day} style={{ ...tdStyle, textAlign: "center", ...cycleEndStyle(day) }}>
+                      {dayBadges ? <DailyTradeBadges badges={dayBadges} /> : null}
+                    </td>
+                  );
+                }
+                return slotsForDay.map((seq, slotIdx) => {
+                  const matched = dayBadges?.filter((badge) => badge.seq === seq);
+                  const isFirst = slotIdx === 0;
+                  const isLast = slotIdx === slotsForDay.length - 1;
+                  return (
+                    <td
+                      key={`${day}:${seq}`}
+                      style={{
+                        ...tdStyle,
+                        textAlign: "center",
+                        paddingLeft: isFirst ? 8 : 2,
+                        paddingRight: isLast ? 8 : 2,
+                        ...(isLast ? cycleEndStyle(day) : null),
+                      }}
+                    >
+                      {matched?.length ? <DailyTradeBadges badges={matched} /> : null}
+                    </td>
+                  );
+                });
+              });
               const lowLine = rowIdx === lowLineIndex ? <RecentPriceRow index={index} columnCount={columnCount} kind="low" /> : null;
               if (row === null) {
                 return (
