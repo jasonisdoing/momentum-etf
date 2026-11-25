@@ -751,14 +751,30 @@ def modify_record(order_id: str) -> dict[str, Any]:
     return serialize_order(orders.find_one({"_id": record["_id"]}))
 
 
+def partial_fill_cancel_message(order: dict[str, Any]) -> str | None:
+    """일부 체결된 주문이면 취소 불가 안내 문구, 미체결이면 None."""
+    filled = int(order.get("filled_quantity") or 0)
+    if filled <= 0:
+        return None
+    quantity = int(order["quantity"])
+    pct = (filled / quantity * 100.0) if quantity > 0 else 0.0
+    return f"이미 체결된 수량이 {filled:,}주({pct:.1f}%) 있어 취소할 수 없습니다. 호가 정정을 이용하세요."
+
+
 def cancel_record(order_id: str) -> dict[str, Any]:
-    """대기중·부분체결 주문을 전량 취소하고 상태를 다시 읽는다."""
+    """대기중인 미체결 주문을 취소하고 상태를 다시 읽는다 — 일부 체결된 주문은 막는다."""
     orders = _orders()
     record = orders.find_one({"_id": ObjectId(order_id)})
     if record is None:
         raise BrokerApiError("주문 기록을 찾을 수 없습니다.")
+    refresh_account_orders(record["account_id"])
+    record = orders.find_one({"_id": ObjectId(order_id)})
+    if record is None:
+        raise BrokerApiError("주문 기록을 찾을 수 없습니다.")
     if record["status"] not in ("pending", "partial") or not record.get("order_no"):
-        raise BrokerApiError("대기중이거나 부분체결인 주문만 취소할 수 있습니다.")
+        raise BrokerApiError("대기중인 주문만 취소할 수 있습니다.")
+    if (msg := partial_fill_cancel_message(record)) is not None:
+        raise BrokerApiError(msg)
     cancelled = cancel_order(record["account_id"], _current_order_no(record), record["ticker"], record["venue"])
     orders.update_one(
         {"_id": record["_id"]},
@@ -940,6 +956,7 @@ def _config():
 MESSAGE_PENDING = "pending"
 MESSAGE_PLACED = "placed"
 MESSAGE_DONE = "done"
+MESSAGE_PARTIAL = "partial"
 MESSAGE_FAILED = "failed"
 MESSAGE_OPEN = "open"
 
@@ -1014,10 +1031,12 @@ def _orders_outcome(orders: list[dict[str, Any]]) -> str:
             else MESSAGE_PENDING
         )
     if pair_id is not None:
-        return (
-            MESSAGE_DONE if {o["side"] for o in group if o["status"] == "filled"} == {"buy", "sell"} else MESSAGE_FAILED
-        )
-    return MESSAGE_DONE if latest["status"] == "filled" else MESSAGE_FAILED
+        if {o["side"] for o in group if o["status"] == "filled"} == {"buy", "sell"}:
+            return MESSAGE_DONE
+        return MESSAGE_PARTIAL if any(int(o.get("filled_quantity") or 0) > 0 for o in group) else MESSAGE_FAILED
+    if latest["status"] == "filled":
+        return MESSAGE_DONE
+    return MESSAGE_PARTIAL if int(latest.get("filled_quantity") or 0) > 0 else MESSAGE_FAILED
 
 
 def signal_message_states(thread: dict[str, Any]) -> dict[str, str]:
@@ -1025,7 +1044,15 @@ def signal_message_states(thread: dict[str, Any]) -> dict[str, str]:
     by_message: dict[str, list[dict[str, Any]]] = {}
     for order in _orders().find(
         {"slack.channel": thread["channel"], "slack.thread_ts": thread["thread_ts"]},
-        {"slack.message_ts": 1, "status": 1, "side": 1, "pair_id": 1, "order_no": 1, "created_at": 1},
+        {
+            "slack.message_ts": 1,
+            "status": 1,
+            "side": 1,
+            "pair_id": 1,
+            "order_no": 1,
+            "filled_quantity": 1,
+            "created_at": 1,
+        },
     ):
         by_message.setdefault(order["slack"]["message_ts"], []).append(order)
     settled = {item["ts"]: item["outcome"] for item in thread["settled"]}
@@ -1057,10 +1084,10 @@ def reorderable_signal_messages(thread: dict[str, Any]) -> set[str]:
 
 
 def signal_thread_state(states: dict[str, str]) -> str | None:
-    """신호 메시지 반응 하나 — 처리 중(⏳) · 접수됨(🎯) · 완료(✅) · 실패(❌) · 없음(None) 중 하나만 정한다.
+    """신호 메시지 반응 하나 — 처리 중(⏳) · 접수됨(🎯) · 완료(✅) · 일부체결(🌗) · 실패(❌) · 없음(None) 중 하나만 정한다.
 
     처리 중인 주문이 있거나 일부만 끝났으면 처리 중, 접수돼 체결 대기 중이면 접수됨, 전부 완료면 완료,
-    손댄 것 없이 열려 있으면 없음, 열린 것 없이 끝났는데 완료가 아닌 메시지가 있으면 실패다.
+    일부 체결이 섞여 끝났으면 일부체결, 손댄 것 없이 열려 있으면 없음, 열린 것 없이 끝났는데 완료가 아닌 메시지가 있으면 실패다.
     """
     values = set(states.values())
     if MESSAGE_PENDING in values:
@@ -1071,6 +1098,8 @@ def signal_thread_state(states: dict[str, str]) -> str | None:
         return MESSAGE_DONE
     if MESSAGE_OPEN in values:
         return MESSAGE_PENDING if values - {MESSAGE_OPEN} else None
+    if MESSAGE_PARTIAL in values:
+        return MESSAGE_PARTIAL
     return MESSAGE_FAILED
 
 

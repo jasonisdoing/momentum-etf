@@ -104,6 +104,7 @@ type SignalActionState = {
     remaining_quantity: number;
   } | null;
   modify_error?: string | null;
+  cancel_error?: string | null;
   withdraw_key: string | null;
 };
 
@@ -259,7 +260,7 @@ export function SlackSignalActionModal({ target, onClose, onChanged, onWithdrawn
           <button
             type="button"
             className="btn btn-outline-danger"
-            disabled={busy}
+            disabled={busy || Boolean(state.cancel_error)}
             onClick={() => void runAction("cancel")}
           >
             {submitting ? "처리 중…" : "주문 취소"}
@@ -432,6 +433,11 @@ export function SlackSignalActionModal({ target, onClose, onChanged, onWithdrawn
           <p style={{ margin: "8px 0 0", color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
             정정 또는 취소 전 증권사 최신 미체결 잔량을 다시 확인한 뒤 반영합니다.
           </p>
+          {state.cancel_error ? (
+            <p style={{ margin: "6px 0 0", fontSize: "var(--fs-sm)" }}>
+              <FormattedAlertMessage message={state.cancel_error} />
+            </p>
+          ) : null}
         </div>
       ) : null}
 

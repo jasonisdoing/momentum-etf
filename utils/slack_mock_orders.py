@@ -36,6 +36,7 @@ from utils.strategy_trade_orders import (
     MESSAGE_DONE,
     MESSAGE_FAILED,
     MESSAGE_OPEN,
+    MESSAGE_PARTIAL,
     MESSAGE_PENDING,
     MESSAGE_PLACED,
     OrderPrecheckError,
@@ -52,6 +53,7 @@ from utils.strategy_trade_orders import (
     mark_slack_notified,
     modify_record,
     pair_records,
+    partial_fill_cancel_message,
     place_order,
     place_swap,
     preview_modify_record,
@@ -94,6 +96,7 @@ REACTIONS = {
     MESSAGE_PENDING: "hourglass_flowing_sand",
     MESSAGE_PLACED: "dart",
     MESSAGE_DONE: "white_check_mark",
+    MESSAGE_PARTIAL: "last_quarter_moon",
     MESSAGE_FAILED: "x",
 }
 _REACTION_NOOP_ERRORS = ("already_reacted", "no_reaction")
@@ -524,7 +527,7 @@ def _modify_view(request: dict[str, Any], preview: dict[str, Any], target: dict[
 
 def _cancel_view(request: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
     side = _SIDE_LABELS[request["side"]]
-    body = f"*{_order_text(request)}*\n{_account_line(request)}\n접수된 {_env_word(request['env'])} {side} 주문을 취소합니다(일부 체결됐다면 남은 수량만 취소됩니다)."
+    body = f"*{_order_text(request)}*\n{_account_line(request)}\n접수된 {_env_word(request['env'])} {side} 주문을 취소합니다."
     return _modal_view(
         CANCEL_CALLBACK_ID, f"{_env_word(request['env'])} {side} 주문 취소 확인", "주문 취소", body, target
     )
@@ -592,6 +595,21 @@ def fill_confirm_modal(job: dict[str, Any]) -> None:
     """
     target, view_id = job["target"], job["view_id"]
     request = target["request"]
+    if job.get("kind") == "cancel":
+        try:
+            refreshed = refreshed_order(request["account_id"], target["order_id"])
+        except Exception as exc:
+            logger.exception("슬랙 주문 취소 확인 모달 채우기 실패")
+            _update_view(view_id, _status_view(request, target, f"❌ 주문 취소 확인을 열 수 없습니다: {exc}"))
+            return
+        if refreshed["status"] not in ("pending", "partial"):
+            _update_view(view_id, _status_view(request, target, "❌ 이미 종료된 주문이라 취소할 수 없습니다."))
+            return
+        if (msg := partial_fill_cancel_message(refreshed)) is not None:
+            _update_view(view_id, _status_view(request, target, f"❌ {msg}"))
+            return
+        _update_view(view_id, _cancel_view(request, target))
+        return
     if job.get("kind") == "modify":
         try:
             preview = preview_modify_record(target["order_id"])
@@ -657,10 +675,11 @@ def open_confirm_modal(payload: dict[str, Any]) -> dict[str, Any] | None:
         )
         return {"kind": "modify", "target": {**target, "order_id": value["order_id"]}, "view_id": opened["view"]["id"]}
     if action["action_id"] == CANCEL_ACTION_ID:
-        client.views_open(
-            trigger_id=payload["trigger_id"], view=_cancel_view(request, {**target, "order_id": value["order_id"]})
+        opened = client.views_open(
+            trigger_id=payload["trigger_id"],
+            view=_status_view(request, target, "⏳ 체결 상태를 확인하는 중…"),
         )
-        return None
+        return {"kind": "cancel", "target": {**target, "order_id": value["order_id"]}, "view_id": opened["view"]["id"]}
     raise BrokerApiError(f"알 수 없는 슬랙 버튼입니다: {action['action_id']}")
 
 
@@ -682,6 +701,15 @@ def _final_text(order: dict[str, Any]) -> str:
     fill = f"체결 {order['filled_quantity']:,}주 · 체결가 {format_money(order['average_fill_price'], order['country'])}"
     if order["status"] == "filled":
         return f"✅ {side} 체결 완료: {head} ({fill})"
+    if order["status"] in ("canceled", "expired") and int(order.get("filled_quantity") or 0) > 0:
+        qty = int(order["quantity"])
+        filled = int(order["filled_quantity"])
+        pct = (filled / qty * 100.0) if qty > 0 else 0.0
+        label = "일부 체결 후 취소" if order["status"] == "canceled" else "일부 체결 후 만료"
+        return (
+            f"🌗 {side} {label}: {head} "
+            f"(체결 {filled:,}/{qty:,}주 · {pct:.1f}% · 체결가 {format_money(order['average_fill_price'], order['country'])})"
+        )
     if order["status"] == "canceled":
         return f"🚫 {side} 주문 취소됨: {head} ({fill})"
     if order["status"] == "expired":
@@ -1051,7 +1079,7 @@ def _apply_thread_reaction(thread: dict[str, Any]) -> str | None:
         if state is not None:
             _react("reactions_add", channel, thread_ts, REACTIONS[state])
         set_signal_thread_reaction(thread_ts, state)
-    if state == MESSAGE_DONE:
+    if state in (MESSAGE_DONE, MESSAGE_PARTIAL):
         from utils.strategy_trade_threads import complete_signal_thread
 
         complete_signal_thread(thread_ts)
@@ -1261,6 +1289,7 @@ def describe_slack_thread_action(
                     if preview
                     else None,
                     "modify_error": modify_error,
+                    "cancel_error": partial_fill_cancel_message(refreshed),
                     "withdraw_key": None,
                 },
                 None,
