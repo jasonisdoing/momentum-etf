@@ -811,12 +811,18 @@ def _toss_us_price_entry(item: dict[str, Any], session: str, closed_day: str, in
         if session == AFTERMARKET
         else "base"
     )
-    price_field = regular_field if session == CLOSED else ("afterMarketClose" if session == AFTERMARKET else "close")
+    price_field = (
+        "close"
+        if in_daymarket_gap
+        else regular_field
+        if session == CLOSED
+        else ("afterMarketClose" if session == AFTERMARKET else "close")
+    )
     price = _safe_float(item.get(price_field))
     if price is None or not isfinite(price) or price <= 0:
         raise ValueError(f"토스 미국 {session} 시세의 {price_field}가 유효하지 않습니다.")
 
-    regular_close = price if session == CLOSED else _safe_float(item.get(regular_field))
+    regular_close = price if (session == CLOSED and not in_daymarket_gap) else _safe_float(item.get(regular_field))
     if regular_close is not None and (not isfinite(regular_close) or regular_close <= 0):
         regular_close = None
     if session == CLOSED and regular_close is None:
@@ -833,7 +839,7 @@ def _toss_us_price_entry(item: dict[str, Any], session: str, closed_day: str, in
         entry["tradeDateTime"] = local_stamp.tz_convert("UTC").isoformat()
     if regular_close is not None:
         entry["regularClose"] = regular_close
-    if session != CLOSED and regular_close is not None:
+    if (session != CLOSED or in_daymarket_gap) and regular_close is not None:
         entry["lastRegularClose"] = regular_close
         # 장외 가격의 등락률은 마지막 정규장 종가부터 계산한다.
         # 정규장의 전날 대비 등락률은 확정 봉을 읽는 화면이 별도로 계산한다.
