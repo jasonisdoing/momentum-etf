@@ -99,14 +99,18 @@ def _matching_signal(sent_log: dict[str, dict[str, Any]], trigger: dict[str, Any
 
 
 def _level(value: float | None, country: str) -> str:
-    """가격 표기 — 국장은 원 단위 정수, 미장은 달러 소수 둘째 자리. 없으면 '-'."""
-    return format_level(value, country)
+    """가격 표기 — 국장은 원 단위 정수, 미장은 `$` 붙인 달러 소수 둘째 자리(Slack 볼드). 없으면 '-'."""
+    text = format_level(value, country)
+    if text == "-":
+        return "-"
+    formatted = text if country == "kor" else f"${text}"
+    return f"*{formatted}*"
 
 
 def _index_text(index: dict[str, Any], country: str) -> str:
-    """`262,870 (-2.34%)` — 종목 현재가와 일간 변동률."""
+    """`*262,870* (-2.34%)` — 종목 현재가와 일간 변동률."""
     change = index.get("change_pct")
-    base = format_level(index["close"], country)
+    base = _level(index["close"], country)
     return f"{base} ({change:+.2f}%)" if change is not None else base
 
 
@@ -463,15 +467,16 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
         quantity = f"{row['quantity']:,}주"
         if row["held"]:
             profit_text = f"{row['profit_pct']:+.2f}%" if row["profit_pct"] is not None else "-"
+            buy_text = f" · 매수 {_level(row['fill_price'], country)}" if row.get("fill_price") is not None else ""
             if row["sell_reached"]:
                 word = "지금 매도 후 재매수!" if row["rebuy_after_sell"] else "지금 매도!"
                 lines.append(
-                    f"🔴 {row['round']}호 {quantity} *{word}* {_level(row['sell_index'], country)} 도달 ({profit_text})"
-                    f"{_already_sent_note(row['round'], 'sell', triggered)}"
+                    f"🔴 {row['round']}호 {quantity} *{word}* {_level(row['sell_index'], country)} 도달"
+                    f"{buy_text} ({profit_text}){_already_sent_note(row['round'], 'sell', triggered)}"
                 )
             else:
                 lines.append(
-                    f"🟢 {row['round']}호 {quantity} 보유 중 ({profit_text}) · 매도 목표 {_level(row['sell_index'], country)}"
+                    f"🟢 {row['round']}호 {quantity} 보유 중{buy_text} ({profit_text}) · 매도 목표 {_level(row['sell_index'], country)}"
                 )
         elif row["budget_short"]:
             lines.append(f"⏸ {row['round']}호 회차 금액으로 1주 매수 불가 · {plan_text(row)}")
