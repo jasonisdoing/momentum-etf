@@ -158,7 +158,9 @@ export function SlackSignalActionModal({ target, onClose, onChanged, onWithdrawn
 
   const busy = loading || submitting || withdrawBusy;
   const phaseColor = state ? PHASE_COLORS[state.phase] : "var(--text-muted)";
-  const effectiveWithdrawKey = state ? state.withdraw_key : target.withdrawKey;
+  const effectiveWithdrawKey = state
+    ? (state.withdraw_key ? (target.withdrawKey ?? state.withdraw_key) : null)
+    : target.withdrawKey;
 
   async function runAction(kind: "order" | "modify" | "cancel") {
     if (!target || !state || busy) return;

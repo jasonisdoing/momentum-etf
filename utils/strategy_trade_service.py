@@ -358,12 +358,14 @@ def _save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, gr
 
 
 def _change_note(previous: dict[str, Any], target: dict[str, Any]) -> str | None:
-    """신호 판정을 바꾸는 설정(간격·회차 금액)이 달라졌으면 변경 내용 문구, 아니면 None."""
+    """신호 판정·주문 방식이 달라졌으면 변경 내용 문구, 아니면 None."""
     parts = []
     if previous["trigger_pct"] != target["trigger_pct"]:
         parts.append(f"간격 {previous['trigger_pct']:g}% → {target['trigger_pct']:g}%")
     if previous["round_size"] != target["round_size"]:
         parts.append(f"회차 금액 {previous['round_size']:,}만원 → {target['round_size']:,}만원")
+    if not previous.get("auto_order") and target.get("auto_order"):
+        parts.append("자동 주문 켜짐")
     return " · ".join(parts) or None
 
 
