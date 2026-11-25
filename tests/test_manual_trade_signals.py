@@ -1435,6 +1435,52 @@ class MeritzTokenRefreshTest(TestCase):
         self.assertEqual(meritz._access_token("a1"), "new-private-token")
         self.post.assert_called_once()
 
+    def test_same_short_token_is_used_then_deferred_until_real_expiry(self):
+        clock = [self.now]
+        expiry = self.now + 50
+        token = self.jwt(expiry)
+        self.put(token, expiry, self.now - 43150)
+        self.response.json.return_value["access_token"] = token
+        with patch.object(meritz.time, "time", side_effect=lambda: clock[0]):
+            self.assertEqual(meritz._access_token("a1"), token)
+            saved = self.config.find_one({"_id": "meritz_token:a1"})
+            self.assertEqual(saved["issued_at"], self.now - 43150)
+            self.assertEqual(saved["exp"], expiry)
+            clock[0] += 20
+            with self.assertRaises(meritz.MeritzTokenRefreshPendingError) as pending:
+                meritz._access_token("a1")
+            self.assertEqual(pending.exception.retry_at, expiry + 1)
+            self.assertEqual(self.post.call_count, 1)
+            clock[0] = expiry + 2
+            self.response.json.return_value["access_token"] = self.jwt(clock[0] + 43200)
+            meritz._access_token("a1")
+            self.assertEqual(self.post.call_count, 2)
+
+    def test_pending_refresh_prevents_order_submission_and_reissuance(self):
+        token = self.jwt(self.now + 5)
+        self.put(token, self.now + 5, self.now - 43195)
+        self.config.update_one({"_id": "meritz_token:a1"}, {"$set": {"refresh_not_before": self.now + 6}})
+        with patch.object(meritz, "_send_request") as send:
+            with self.assertRaises(meritz.MeritzTokenRefreshPendingError):
+                meritz._request("a1", "POST", meritz.ORDER_PATH["buy"], success=meritz._ORDER_CODES, body={})
+        send.assert_not_called()
+        self.post.assert_not_called()
+
+    def test_other_workers_new_token_is_reused_during_refresh_cooldown(self):
+        self.put("new-private-token", self.now + 1000, self.now)
+        self.config.update_one({"_id": "meritz_token:a1"}, {"$set": {"refresh_not_before": self.now + 5}})
+        self.assertEqual(meritz._issue_token("a1", "old-private-token"), "new-private-token")
+        self.post.assert_not_called()
+
+    def test_pending_authentication_is_not_changed_to_round_error(self):
+        pending = meritz.MeritzTokenRefreshPendingError(self.now + 10)
+        with (
+            patch("services.broker_trade_service.require_trade_account"),
+            patch.object(trade_service, "refresh_ledgers", side_effect=pending),
+        ):
+            with self.assertRaises(meritz.MeritzTokenRefreshPendingError):
+                trade_service._account_ledgers({"a1": ["ETF"]}, fresh=True)
+
 
 class OrderNotificationIsolationTest(TestCase):
     def test_account_failure_does_not_change_its_orders_or_stop_next_account(self):
@@ -1670,3 +1716,52 @@ class TradeHistoryRoundPlacementTest(TestCase):
             for index, trade in enumerate(trades)
         ]
         self.assertEqual(trade_service._paired_trade_rounds(trades, records), {0: 7, 1: 7})
+
+
+class TokenRefreshBatchRecoveryTest(TestCase):
+    """토큰 경계 대기를 계좌별로 처리하고 재시도 소진 시에만 장애로 확정한다."""
+
+    def run_sync(self, due_times, recover):
+        from utils import broker_balance_sync as sync
+
+        clock, calls, attempted = [1000.0], [], set()
+        accounts = [{"account_id": key, "broker_api": {"provider": "MERITZ"}} for key in due_times]
+
+        def attempt(account_id):
+            calls.append((account_id, clock[0]))
+            if account_id not in attempted or not recover:
+                attempted.add(account_id)
+                raise meritz.MeritzTokenRefreshPendingError(max(clock[0] + 1, due_times[account_id]))
+            return {"account_id": account_id, "ok": True}
+
+        def sleep(seconds):
+            self.assertLessEqual(seconds, 30)
+            clock[0] += seconds
+
+        with (
+            patch("utils.account_settings_store.load_live_account_docs", return_value=accounts),
+            patch.object(sync, "_sync_account", side_effect=attempt),
+            patch.object(sync, "_load_failing", return_value=False),
+            patch.object(sync, "_save_failing") as save,
+            patch.object(sync, "_notify", return_value=True) as notify_slack,
+            patch.object(sync, "epoch_time", side_effect=lambda: clock[0]),
+            patch.object(sync, "sleep", side_effect=sleep),
+            patch.object(sync, "_MERITZ_BALANCE_OPEN", datetime.min.time()),
+            patch.object(sync, "_MERITZ_BALANCE_CLOSE", datetime.max.time()),
+        ):
+            result = sync.sync_all()
+        return result, calls, notify_slack, save
+
+    def test_accounts_retry_independently_and_send_one_recovery_summary(self):
+        result, calls, notices, save = self.run_sync({"a1": 1050, "a2": 1003}, recover=True)
+        self.assertTrue(all(account["ok"] for account in result["accounts"]))
+        self.assertEqual(calls, [("a1", 1000), ("a2", 1000), ("a2", 1003), ("a1", 1050)])
+        notices.assert_called_once()
+        save.assert_not_called()
+
+    def test_persistent_authentication_failure_has_a_bounded_retry_budget(self):
+        result, calls, notices, save = self.run_sync({"a1": 1001}, recover=False)
+        self.assertFalse(result["accounts"][0]["ok"])
+        self.assertEqual(len(calls), 4)
+        notices.assert_called_once()
+        save.assert_called_once()

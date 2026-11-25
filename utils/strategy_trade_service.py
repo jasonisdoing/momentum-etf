@@ -1158,6 +1158,7 @@ def _account_ledgers(
     """
     from services.broker_api_service import BrokerApiError
     from services.broker_trade_service import require_trade_account
+    from services.meritz_api_service import MeritzTokenExpiredError
 
     load = refresh_ledgers if fresh else read_ledgers
     ledgers: dict[str, dict[str, Ledger | LedgerError] | str] = {}
@@ -1166,6 +1167,8 @@ def _account_ledgers(
             require_trade_account(account_id)
             ledgers[account_id] = load(account_id, tickers)
         except BrokerApiError as error:
+            if fresh and isinstance(error, MeritzTokenExpiredError):
+                raise
             ledgers[account_id] = str(error)
     return ledgers
 

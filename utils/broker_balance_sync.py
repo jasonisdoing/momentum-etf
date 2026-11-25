@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, time
 from time import sleep
+from time import time as epoch_time
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -21,9 +22,8 @@ _STATE_KEY = "broker_balance_sync_state"
 _KST = ZoneInfo("Asia/Seoul")
 _MERITZ_BALANCE_OPEN = time(0, 15)
 _MERITZ_BALANCE_CLOSE = time(23, 50)
-# 메리츠 토큰 만료 오류는 재발급 직후에도 일시적으로 이어질 수 있다 — 1·2·3분 간격으로 다시 조회한다(누적 6분,
-# 다음 배치 10분 전에 끝난다). 재시도가 한 번이라도 있었으면 결과와 무관하게 슬랙으로 알린다.
-_MERITZ_RETRY_DELAYS_SECONDS = (60, 120, 180)
+# 갱신 가능 시각을 기다린 뒤 계좌별로 짧게 재시도한다. 소진 시에만 장애로 확정한다.
+_MERITZ_RETRY_DELAYS_SECONDS = (2, 5, 10)
 
 
 def _db():
@@ -188,7 +188,7 @@ def _diff_lines(current: dict[str, Any] | None, fetched: dict[str, Any]) -> list
     return lines
 
 
-def _sync_account(account_id: str, provider: str) -> dict[str, Any]:
+def _sync_account(account_id: str) -> dict[str, Any]:
     from services.broker_api_service import fetch_broker_balance
     from utils.portfolio_io import load_portfolio_master
 
@@ -196,19 +196,12 @@ def _sync_account(account_id: str, provider: str) -> dict[str, Any]:
     result = {"account_id": account_id, "ok": True, "changed": False}
     if _diff_lines(load_portfolio_master(account_id), fetched):
         result.update(apply_broker_balance(account_id, fetched, trigger="배치"))
-    if _load_failing(account_id):
-        _save_failing(account_id, False)
-        _notify(f"✅ 증권사 잔고 동기화 복구 — {account_id} ({provider})")
     return result
 
 
-def _attempt_record(account_id: str, outcome: str) -> str:
-    """재시도 실험 기록 한 줄 — 시각·결과·그 시점 공유 토큰의 나이."""
-    from services.meritz_api_service import token_age_seconds
-
-    age = token_age_seconds(account_id)
-    age_text = "기록 없음" if age is None else f"{age}초"
-    return f"{datetime.now():%H:%M:%S} {outcome} (공유 토큰 발급 후 {age_text})"
+def _attempt_record(outcome: str) -> str:
+    """계좌별 갱신 대기와 복구 시각을 남긴다."""
+    return f"{datetime.now(_KST):%H:%M:%S} {outcome}"
 
 
 def _retry_lines(history: dict[str, list[str]], account_id: str) -> str:
@@ -217,9 +210,9 @@ def _retry_lines(history: dict[str, list[str]], account_id: str) -> str:
 
 
 def sync_all() -> dict[str, Any]:
-    """연동 계좌를 동기화하고, 메리츠 토큰 만료 오류만 1·2·3분 간격으로 다시 조회한다."""
+    """연동 계좌를 동기화하고, 메리츠 인증 갱신은 계좌별 가능 시각 이후 제한적으로 다시 조회한다."""
     from services.broker_api_service import MERITZ_PROVIDER
-    from services.meritz_api_service import MeritzTokenExpiredError
+    from services.meritz_api_service import MeritzTokenExpiredError, MeritzTokenRefreshPendingError
     from utils.account_settings_store import load_live_account_docs
 
     accounts: list[tuple[str, str]] = []
@@ -231,6 +224,7 @@ def sync_all() -> dict[str, Any]:
     results: dict[str, dict[str, Any]] = {}
     history: dict[str, list[str]] = {}  # 토큰 만료로 재시도 대상이 된 계좌의 시도 기록
     new_failures: list[tuple[str, str, str]] = []
+    retry_times: dict[str, float] = {}
 
     def attempt(account_id: str, provider: str) -> bool:
         """동기화 한 번 — 토큰 만료로 다시 시도할 계좌면 True. 그 밖의 실패는 바로 확정한다."""
@@ -240,12 +234,15 @@ def sync_all() -> dict[str, Any]:
             results[account_id] = {"account_id": account_id, "ok": True, "skipped": True}
             return False
         try:
-            results[account_id] = _sync_account(account_id, provider)
+            results[account_id] = _sync_account(account_id)
         except Exception as exc:  # noqa: BLE001 — 계좌별로 실패를 격리한다.
             message = str(exc)
             if isinstance(exc, MeritzTokenExpiredError):
-                history.setdefault(account_id, []).append(_attempt_record(account_id, f"만료 오류: {message}"))
-                logger.warning("[BROKER-SYNC] %s 재조회 대기: %s", account_id, message)
+                history.setdefault(account_id, []).append(_attempt_record("인증 갱신 대기"))
+                retry_times[account_id] = (
+                    exc.retry_at if isinstance(exc, MeritzTokenRefreshPendingError) else epoch_time()
+                )
+                logger.info("[BROKER-SYNC] %s 인증 갱신 대기: %s", account_id, message)
                 results[account_id] = {"account_id": account_id, "ok": False, "error": message}
                 return True
             results[account_id] = {"account_id": account_id, "ok": False, "error": message}
@@ -254,27 +251,50 @@ def sync_all() -> dict[str, Any]:
                 new_failures.append((account_id, provider, message))
             return False
         if account_id in history:
-            history[account_id].append(_attempt_record(account_id, "성공"))
+            history[account_id].append(_attempt_record("성공"))
+        if _load_failing(account_id):
+            _save_failing(account_id, False)
+            if account_id not in history:
+                _notify(f"✅ 증권사 잔고 동기화 복구 — {account_id} ({provider})")
         return False
 
-    pending = [(account_id, provider) for account_id, provider in accounts if attempt(account_id, provider)]
-    for delay in _MERITZ_RETRY_DELAYS_SECONDS:
-        if not pending:
-            break
-        sleep(delay)
-        pending = [(account_id, provider) for account_id, provider in pending if attempt(account_id, provider)]
-    for account_id, provider in pending:  # 재시도를 다 써도 만료 오류가 이어졌다
-        message = results[account_id]["error"]
-        logger.warning("[BROKER-SYNC] %s 동기화 실패: %s", account_id, message)
-        if not _load_failing(account_id):
-            new_failures.append((account_id, provider, message))
+    pending: dict[str, tuple[str, int, float]] = {}
+    for account_id, provider in accounts:
+        if attempt(account_id, provider):
+            pending[account_id] = (
+                provider,
+                0,
+                max(retry_times[account_id], epoch_time() + _MERITZ_RETRY_DELAYS_SECONDS[0]),
+            )
+    while pending:
+        account_id = min(pending, key=lambda key: pending[key][2])
+        provider, index, due = pending[account_id]
+        remaining = due - epoch_time()
+        if remaining > 0:
+            sleep(min(remaining, 30))
+            continue
+        del pending[account_id]
+        if not attempt(account_id, provider):
+            continue
+        index += 1
+        if index < len(_MERITZ_RETRY_DELAYS_SECONDS):
+            pending[account_id] = (
+                provider,
+                index,
+                max(retry_times[account_id], epoch_time() + _MERITZ_RETRY_DELAYS_SECONDS[index]),
+            )
+        else:
+            message = results[account_id]["error"]
+            logger.warning("[BROKER-SYNC] %s 인증 갱신 재시도 소진: %s", account_id, message)
+            if not _load_failing(account_id):
+                new_failures.append((account_id, provider, message))
 
     retried_ok = [
         account_id for account_id in history if results[account_id]["ok"] and not results[account_id].get("skipped")
     ]
     if retried_ok:
         body = "\n".join(f"• {account_id}\n{_retry_lines(history, account_id)}" for account_id in retried_ok)
-        _notify(f"ℹ️ *증권사 잔고 동기화 — 토큰 만료로 재시도 후 성공 ({len(retried_ok)}개 계좌)*\n{body}")
+        _notify(f"ℹ️ *증권사 잔고 동기화 — 인증 갱신 후 성공 ({len(retried_ok)}개 계좌)*\n{body}")
 
     notification_handled = True
     if new_failures:

@@ -61,6 +61,14 @@ class MeritzTokenExpiredError(BrokerApiError):
     """조회 토큰을 다시 발급한 뒤에도 메리츠가 만료로 거부했다."""
 
 
+class MeritzTokenRefreshPendingError(MeritzTokenExpiredError):
+    """만료 경계에서 새 토큰을 기다린다. 배치만 지정 시각 이후 재시도한다."""
+
+    def __init__(self, retry_at: float):
+        super().__init__("인증 갱신 중 — 잠시 후 다시 시도하세요.")
+        self.retry_at = retry_at
+
+
 class MeritzTokenRefreshBusyError(MeritzTokenExpiredError):
     """유효한 인증을 아직 확보하지 못했고 다른 작업이 갱신 중이어서 다음 조회를 기다린다."""
 
@@ -88,8 +96,11 @@ _REQUEST_TIMEOUT_SECONDS = 10
 # 일시적 조회 통신 오류만 재시도한다. 기존 최소 호출 간격은 별도로 유지한다.
 _INQUIRY_RETRY_DELAYS = (0.5, 1.0)
 _MAX_PAGES = 20
-# 만료 직전 토큰은 쓰지 않는다 — 요청 도중 만료되지 않게 여유를 둔다.
-_TOKEN_MARGIN_SECONDS = 60
+# 사전 갱신 시점과 요청 한 번을 끝낼 최소 수명을 분리한다.
+_TOKEN_REFRESH_MARGIN_SECONDS = 60
+_TOKEN_USE_MARGIN_SECONDS = (_REQUEST_TIMEOUT_SECONDS + _MIN_INTERVAL_SECONDS) * (len(_INQUIRY_RETRY_DELAYS) + 1) + sum(
+    _INQUIRY_RETRY_DELAYS
+)
 # 갱신 직후의 만료 응답은 GET만 잠깐 기다린다. 토큰 발급과 주문을 반복하지 않는다.
 _TOKEN_RETRY_DELAYS = (1.0, 2.0)
 _TOKEN_REISSUE_COOLDOWN_SECONDS = 5
@@ -151,7 +162,7 @@ def _token_claims(token: str) -> dict[str, int | float]:
         raise BrokerApiError("메리츠증권 JWT의 발급·만료 시각을 확인할 수 없습니다.") from None
 
 
-def _usable_token(doc: dict[str, Any]) -> bool:
+def _usable_token(doc: dict[str, Any], margin_seconds: float) -> bool:
     if not doc.get("token"):
         return False
     if "exp" not in doc:
@@ -160,7 +171,7 @@ def _usable_token(doc: dict[str, Any]) -> bool:
     claims = _token_claims(str(doc["token"]))
     if "exp" in claims:
         expiry = min(expiry, claims["exp"])
-    return isfinite(expiry) and expiry > time.time() + _TOKEN_MARGIN_SECONDS
+    return isfinite(expiry) and expiry > time.time() + margin_seconds
 
 
 def _token_diagnostics(account_id: str, token: str) -> str:
@@ -170,7 +181,8 @@ def _token_diagnostics(account_id: str, token: str) -> str:
     return (
         f"token_fp={_token_fingerprint(token)} token_iat={claims.get('iat')} token_exp={claims.get('exp')} "
         f"shared_fp={_token_fingerprint(shared) if shared else None} "
-        f"shared_issued_at={doc.get('issued_at')} shared_exp={doc.get('exp')}"
+        f"shared_issued_at={doc.get('issued_at')} shared_exp={doc.get('exp')} "
+        f"refresh_not_before={doc.get('refresh_not_before')}"
     )
 
 
@@ -183,8 +195,15 @@ def _issue_token(account_id: str, rejected_token: str | None) -> str:
             recently_issued = previous.get("issued_at") is not None and (
                 0 <= time.time() - float(previous["issued_at"]) < _TOKEN_REISSUE_COOLDOWN_SECONDS
             )
-            if _usable_token(previous) and (
-                rejected_token is None or previous["token"] != rejected_token or recently_issued
+            usable = _usable_token(previous, _TOKEN_USE_MARGIN_SECONDS)
+            retry_at = float(previous.get("refresh_not_before", 0))
+            fresh = _usable_token(previous, _TOKEN_REFRESH_MARGIN_SECONDS)
+            recently_issued = recently_issued or (fresh and retry_at > time.time())
+            if retry_at > time.time() and (not usable or (not fresh and rejected_token == previous.get("token"))):
+                raise MeritzTokenRefreshPendingError(retry_at)
+            if usable and (
+                (rejected_token is None and (fresh or recently_issued or retry_at > time.time()))
+                or (rejected_token is not None and (previous["token"] != rejected_token or recently_issued))
             ):
                 token = str(previous["token"])
                 logger.info(
@@ -229,17 +248,31 @@ def _fetch_token(account_id: str, previous: dict[str, Any]) -> str:
         expiry = min(expiry, claims["exp"])
     if previous.get("token") == token:
         expiry = min(expiry, float(previous["exp"]))
-    if not isfinite(expiry) or expiry <= now + _TOKEN_MARGIN_SECONDS:
-        logger.warning(
-            "[MERITZ] account=%s stage=authentication outcome=expired token_fp=%s token_exp=%s",
+    if not isfinite(expiry):
+        raise BrokerApiError("메리츠증권 토큰의 만료 시각이 유효하지 않습니다.")
+    same_token = previous.get("token") == token
+    retry_at = max(now + 1, expiry + 1)
+    if expiry <= now + _TOKEN_USE_MARGIN_SECONDS:
+        if same_token:
+            _token_collection().update_one(
+                {"_id": _token_doc_id(account_id)}, {"$set": {"refresh_not_before": retry_at}}
+            )
+        logger.info(
+            "[MERITZ] account=%s stage=authentication outcome=pending token_fp=%s token_exp=%s retry_at=%s",
             account_id,
             _token_fingerprint(token),
-            claims.get("exp"),
+            expiry,
+            retry_at,
         )
-        raise MeritzTokenExpiredError("재발급된 메리츠증권 토큰의 사용 가능한 유효기간이 부족합니다.")
+        raise MeritzTokenRefreshPendingError(retry_at)
+    # 같은 토큰의 발급 시각·수명은 늘리지 않고 다음 갱신 가능 시각만 공유한다.
+    issued_at = previous.get("issued_at", now) if same_token else now
+    refresh_not_before = (
+        retry_at if expiry <= now + _TOKEN_REFRESH_MARGIN_SECONDS else now + _TOKEN_REISSUE_COOLDOWN_SECONDS
+    )
     _token_collection().update_one(
         {"_id": _token_doc_id(account_id)},
-        {"$set": {"token": token, "exp": expiry, "issued_at": now}},
+        {"$set": {"token": token, "exp": expiry, "issued_at": issued_at, "refresh_not_before": refresh_not_before}},
         upsert=True,
     )
     logger.info(
@@ -252,16 +285,10 @@ def _fetch_token(account_id: str, previous: dict[str, Any]) -> str:
     return token
 
 
-def token_age_seconds(account_id: str) -> int | None:
-    """공유 토큰을 발급한 지 몇 초인지 — 발급 시각이 기록되기 전의 토큰이면 None. 만료 실험 기록용이다."""
-    issued_at = _token_collection().find_one({"_id": _token_doc_id(account_id)}, {"issued_at": 1}) or {}
-    return int(time.time() - float(issued_at["issued_at"])) if issued_at.get("issued_at") else None
-
-
 def _access_token(account_id: str) -> str:
     """DB 에 공유된 유효 토큰 — 없거나 곧 만료면 새로 발급한다."""
     doc = _token_collection().find_one({"_id": _token_doc_id(account_id)}) or {}
-    if _usable_token(doc):
+    if _usable_token(doc, _TOKEN_REFRESH_MARGIN_SECONDS):
         return str(doc["token"])
     return _issue_token(account_id, None)
 
@@ -349,6 +376,9 @@ def _request(
     try:
         token = _access_token(account_id)
         mac = _mac_address()
+    except MeritzTokenRefreshPendingError:
+        logger.info("[MERITZ] %s stage=authentication outcome=pending", context)
+        raise
     except Exception as exc:
         logger.error(
             "[MERITZ] %s stage=authentication outcome=failed error=%s elapsed_ms=%.1f",
@@ -409,6 +439,9 @@ def _request(
             logger.warning("[MERITZ] %s stage=authentication attempt=%s outcome=refreshing", context, attempt)
             try:
                 token = _issue_token(account_id, token)
+            except MeritzTokenRefreshPendingError:
+                logger.info("[MERITZ] %s stage=authentication outcome=pending", context)
+                raise
             except Exception as exc:
                 logger.error(
                     "[MERITZ] %s stage=authentication outcome=failed error=%s elapsed_ms=%.1f",
@@ -431,7 +464,7 @@ def _request(
             )
             time.sleep(delay)
             current = _token_collection().find_one({"_id": _token_doc_id(account_id)}) or {}
-            if _usable_token(current) and current["token"] not in rejected_tokens:
+            if _usable_token(current, _TOKEN_USE_MARGIN_SECONDS) and current["token"] not in rejected_tokens:
                 token = str(current["token"])
             continue
         if code in success:
