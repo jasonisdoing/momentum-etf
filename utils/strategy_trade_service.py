@@ -1130,9 +1130,7 @@ def refresh_all_ledgers() -> dict[str, str]:
     from services.broker_api_service import BrokerApiError
 
     started_at = datetime.now(KST).isoformat()
-    strategies = {
-        sid: entry for sid, entry in load_settings()["strategies"].items() if entry["mode"] != TRADE_MODE_DISABLED
-    }
+    strategies = load_settings()["strategies"]
     failed: dict[str, str] = {}
     for account_id, tickers in _tickers_by_account(strategies).items():
         try:
