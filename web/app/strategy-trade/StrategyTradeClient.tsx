@@ -952,8 +952,7 @@ function AccountSettingsCard({
       const price = quote?.price ?? null;
       // 손익은 회차 기준(아래 손익 요약과 같은 값) — 증권사 평균단가(이동평균) 기준 평가손익을 덮는다.
       const rate = view.krw_rate;
-      const isDisabled = row.mode === "disabled";
-      const validStrategy = !isDisabled && strategy && strategy.ticker === row.ticker && !("error" in strategy) ? strategy : undefined;
+      const validStrategy = strategy && strategy.ticker === row.ticker && !("error" in strategy) ? strategy : undefined;
       const pnl = validStrategy && rate != null ? validStrategy.history_summary : undefined;
       const status = validStrategy?.status;
       return {
@@ -986,11 +985,9 @@ function AccountSettingsCard({
             ? Math.floor((Number(row.amount) * 10_000) / (price * view.krw_rate))
             : null,
         held: Boolean(validStrategy && validStrategy.status.held_quantity > 0),
-        heldRounds: isDisabled
-          ? "비활성화"
-          : !strategy || strategy.ticker !== row.ticker
-            ? "미저장"
-            : "error" in strategy ? "오류" : `${strategy.status.held_count}/${strategy.config.rounds}`,
+        heldRounds: !strategy || strategy.ticker !== row.ticker
+          ? "미저장"
+          : "error" in strategy ? "오류" : `${strategy.status.held_count}/${strategy.config.rounds}`,
         heldFull: Boolean(validStrategy && validStrategy.status.held_count >= validStrategy.config.rounds),
       };
     });
@@ -1105,6 +1102,8 @@ function AccountSettingsCard({
       pinned: "left",
       sortable: false,
       editable: false,
+      suppressNavigable: true,
+      suppressKeyboardEvent: () => true,
       cellStyle: { display: "flex", alignItems: "center", paddingLeft: 4, paddingRight: 4 },
       cellRenderer: ({ data, node }: { data?: TradeListRow; node: { rowPinned?: unknown } }) =>
         !data || node.rowPinned || data.is_label || data.is_group ? null : (
@@ -1113,6 +1112,7 @@ function AccountSettingsCard({
             aria-label={`${data.name} 활성화`}
             value={data.mode}
             disabled={saving}
+            onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => updateRow(data.key, { mode: event.target.value as TradeMode })}
             style={{ width: "100%", paddingTop: 2, paddingBottom: 2 }}
