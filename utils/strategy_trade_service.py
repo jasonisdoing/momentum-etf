@@ -845,6 +845,8 @@ def _realized_summary(ledger: Ledger) -> dict[str, Any]:
         "realized_unknown_sells": sum(1 for t in sells if t.realized is None),
         "today_buy_count": sum(1 for t in today_trades if t.buy),
         "today_sell_count": sum(1 for t in today_trades if not t.buy),
+        "recent_buy_count": sum(1 for t in ledger.trades if t.buy),
+        "recent_sell_count": sum(1 for t in ledger.trades if not t.buy),
         "today_buy_amount": sum(t.shares * t.price for t in today_trades if t.buy),
         "today_sell_amount": sum(t.shares * t.price for t in today_trades if not t.buy),
         # 오늘 판 로트의 매입 원가 — 체결가를 모르는 로트를 판 매도는 빠지고 그 건수를 따로 센다.

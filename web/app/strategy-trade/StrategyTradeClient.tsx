@@ -68,6 +68,10 @@ type Status = {
   average_price: number | null;
   average_profit_pct: number | null;
   realized_today?: number;
+  today_buy_count?: number;
+  today_sell_count?: number;
+  recent_buy_count?: number;
+  recent_sell_count?: number;
   // 다음 회차를 살 계좌 현금이 없어 매수를 멈췄다(한도 소진).
   cash_short: boolean;
   budget_short: boolean;
@@ -652,7 +656,65 @@ type TradeListRow = DraftRow & {
   /** 회차 기준 실현손익·합계 손익(원) — 아래 손익 요약(`history_summary`)과 같은 값. */
   realized_krw?: number;
   total_krw?: number;
+  todayTradeCount?: { buy: number; sell: number };
+  recentTradeCount?: { buy: number; sell: number };
 } & Partial<HoldingsRow>;
+
+function sumTradeCounts(
+  rows: TradeListRow[],
+  field: "todayTradeCount" | "recentTradeCount",
+): { buy: number; sell: number } | undefined {
+  let buy = 0;
+  let sell = 0;
+  let found = false;
+  for (const row of rows) {
+    const count = row[field];
+    if (!count) continue;
+    buy += count.buy;
+    sell += count.sell;
+    found = true;
+  }
+  return found ? { buy, sell } : undefined;
+}
+
+function tradeCountColumn(
+  field: "todayTradeCount" | "recentTradeCount",
+  headerName: string,
+  periodLabel: string,
+  headerTooltip: string,
+): ColDef<TradeListRow> {
+  return {
+    colId: field,
+    headerName,
+    headerTooltip,
+    width: 150,
+    type: "rightAligned",
+    valueGetter: ({ data }) => {
+      const count = data?.[field];
+      return count ? count.buy + count.sell : null;
+    },
+    cellRenderer: ({ data }: { data?: TradeListRow }) => {
+      const count = data?.[field];
+      if (!count || data?.is_group) return null;
+      if (count.buy === 0 && count.sell === 0) {
+        return <span style={{ color: "var(--text-muted)" }}>-</span>;
+      }
+      const parts: Array<{ text: string; color: string }> = [];
+      if (count.buy > 0) parts.push({ text: `${count.buy}회 매수`, color: "var(--up-color, #d64545)" });
+      if (count.sell > 0) parts.push({ text: `${count.sell}회 매도`, color: "var(--down-color, #2f6fd0)" });
+      return (
+        <span style={{ whiteSpace: "nowrap" }} title={`${periodLabel} ${parts.map((p) => p.text).join(", ")}`}>
+          {parts.map((part, index) => (
+            <span key={part.text}>
+              {index > 0 ? <span style={{ color: "var(--text-muted)" }}>, </span> : null}
+              <span style={{ color: part.color, fontWeight: 700 }}>{part.text}</span>
+            </span>
+          ))}
+        </span>
+      );
+    },
+  };
+}
 const tradeGridTheme = createAppGridTheme();
 const EMPTY_TRADE_ROWS: TradeListRow[] = [];
 /** 두 그리드(계좌 행·사고팔기 행) 공통 옵션. */
@@ -882,15 +944,21 @@ function AccountSettingsCard({
       const price = quote?.price ?? null;
       // 손익은 회차 기준(아래 손익 요약과 같은 값) — 증권사 평균단가(이동평균) 기준 평가손익을 덮는다.
       const rate = view.krw_rate;
-      const pnl = strategy && strategy.ticker === row.ticker && !("error" in strategy) && rate != null
-        ? strategy.history_summary
-        : undefined;
+      const validStrategy = strategy && strategy.ticker === row.ticker && !("error" in strategy) ? strategy : undefined;
+      const pnl = validStrategy && rate != null ? validStrategy.history_summary : undefined;
+      const status = validStrategy?.status;
       return {
         ...accountAssets?.holdings.get(row.ticker),
         ...row,
         pnl_krw: pnl && rate != null ? pnl.unrealized * rate : undefined,
         realized_krw: pnl && rate != null ? pnl.realized * rate : undefined,
         total_krw: pnl && rate != null ? pnl.total * rate : undefined,
+        todayTradeCount: status?.today_buy_count != null && status?.today_sell_count != null
+          ? { buy: status.today_buy_count, sell: status.today_sell_count }
+          : undefined,
+        recentTradeCount: status?.recent_buy_count != null && status?.recent_sell_count != null
+          ? { buy: status.recent_buy_count, sell: status.recent_sell_count }
+          : undefined,
         memo: memos[row.ticker] ?? "",
         statusRounds: strategy && strategy.ticker === row.ticker && !("error" in strategy) ? strategy.rounds.filter(hasRoundStatus) : [],
         current_price: price == null ? undefined : String(price),
@@ -960,6 +1028,8 @@ function AccountSettingsCard({
         pnl_krw: tradePnl,
         realized_krw: tradeRealized,
         total_krw: tradeTotal,
+        todayTradeCount: sumTradeCounts(stockRows, "todayTradeCount"),
+        recentTradeCount: sumTradeCounts(stockRows, "recentTradeCount"),
         weight_pct: weights.length ? weights.slice(2).reduce((sum, weight) => sum + weight, 0) : undefined,
       },
     ];
@@ -1061,6 +1131,12 @@ function AccountSettingsCard({
           cellClass: ({ node, data }: { node: { rowPinned?: unknown }; data?: TradeListRow }) =>
             !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
         } as ColDef<TradeListRow>,
+        ...(column.field === "pct"
+          ? [
+            tradeCountColumn("todayTradeCount", "거래(오늘)", "오늘", "오늘 매수 / 매도 체결 횟수"),
+            tradeCountColumn("recentTradeCount", "거래(30일)", "최근 30일", "최근 30일(달력) 매수 / 매도 체결 횟수"),
+          ]
+          : []),
         // 회차금액 옆 읽기 전용 — 지금 현재가로 그 금액이 몇 주인지.
         ...(column.field === "amount"
           ? [{
