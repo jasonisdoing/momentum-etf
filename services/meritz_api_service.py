@@ -964,6 +964,14 @@ def _us_today() -> date:
     return session_trade_date("us", datetime.now(ZoneInfo(_US_MARKET_TIMEZONE)))
 
 
+def _parse_us_filled_at(value: Any) -> str | None:
+    """해외 주문내역의 체결시각(`cntg_ymdh`, KST)을 ISO 문자열로 바꾼다 — 미체결이면 None."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return datetime.strptime(text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=ZoneInfo("Asia/Seoul")).isoformat()
+
+
 def _us_row_from_history(row: dict[str, Any]) -> dict[str, Any]:
     """기간 주문체결내역 행 → 공통 중간형. 이 조회에는 취소 확인 수량이 없어 취소 행의 수량으로 대신한다(아래 `_us_order_rows`)."""
     return {
@@ -977,6 +985,7 @@ def _us_row_from_history(row: dict[str, Any]) -> dict[str, Any]:
         "price": float(row["ovrs_stck_oder_prc"]),
         "filled": float(row["cntg_dqty"]),
         "fill_price": float(row["cntg_crnc_prc"]),
+        "filled_at": _parse_us_filled_at(row.get("cntg_ymdh")),
         "canceled": 0.0,
         "state": str(row["ovrs_stck_oder_stat_cls_code"]),
         "kind": str(row["oder_rctf_cncl_cls_code"]),
@@ -1041,6 +1050,7 @@ def us_day_order_rows(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:
                 "unfilled_quantity": int(row["quantity"] - row["filled"] - cancel_qty),
                 "canceled_quantity": int(cancel_qty),
                 "average_fill_price": row["fill_price"],
+                "filled_at": row["filled_at"],
                 "status": _us_status(row, cancel_qty),
             }
         )

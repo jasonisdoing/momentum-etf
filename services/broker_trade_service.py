@@ -9,9 +9,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from services.broker_api_service import MERITZ_PROVIDER, NAMU_PROVIDER, BrokerApiError
+
+_KST = ZoneInfo("Asia/Seoul")
 
 
 def _account_doc(account_id: str) -> dict[str, Any]:
@@ -168,7 +172,12 @@ def list_order_states(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:
                     raise BrokerApiError(
                         f"{row['ticker']} 주문 {row['order_no']}의 체결 수량이 조회 간 일치하지 않습니다."
                     )
-                result.append(live)
+                filled_at = (
+                    live.get("filled_at")
+                    or row.get("filled_at")
+                    or (datetime.now(_KST).isoformat() if live["filled_quantity"] > 0 else None)
+                )
+                result.append({**live, **({"filled_at": filled_at} if filled_at else {})})
                 seen.add(key)
             elif row["status"] in ("pending", "partial"):
                 raise BrokerApiError(
@@ -178,8 +187,12 @@ def list_order_states(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:
             else:
                 result.append(row)
         # 방금 접수되어 기간 이력에 아직 없는 활성 주문도 중복 확인에서 빠뜨리지 않는다.
+        now_iso = datetime.now(_KST).isoformat()
         result.extend(
-            row
+            {
+                **row,
+                **({"filled_at": row.get("filled_at") or now_iso} if row["filled_quantity"] > 0 else {}),
+            }
             for key, row in by_key.items()
             if key not in seen and (row["order_date"] == yyyymmdd or row["status"] in ("pending", "partial"))
         )
@@ -229,6 +242,7 @@ def merge_amendments(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         members = [row, *chain]
         filled = sum(item["filled_quantity"] for item in members)
         cost = sum(item["filled_quantity"] * item["average_fill_price"] for item in members)
+        filled_at = max((item.get("filled_at") for item in members if item.get("filled_at")), default=None)
         merged.append(
             {
                 **result,
@@ -237,6 +251,7 @@ def merge_amendments(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "current_order_no": tip["order_no"],
                 "filled_quantity": filled,
                 "average_fill_price": cost / filled if filled else 0.0,
+                **({"filled_at": filled_at} if filled_at else {}),
             }
         )
     return merged

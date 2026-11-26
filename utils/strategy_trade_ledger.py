@@ -75,6 +75,8 @@ class Trade:
     #: 매도 체결의 실현손익(종목 통화, 수수료·세금 제외) — 팔린 로트의 체결가와 비교한다. 매수이거나
     #: 체결가를 모르는 기초분을 판 경우, 이 필드가 생기기 전에 저장된 체결은 None(모름)이다.
     realized: float | None = None
+    #: 체결 시각(KST ISO) — 미장 최근 24시간 거래 집계에 쓴다.
+    filled_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -132,7 +134,14 @@ def _cache():
 
 
 def _filled(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{field: row[field] for field in _FILL_FIELDS} for row in rows if row["filled_quantity"] > 0]
+    return [
+        {
+            **{field: row[field] for field in _FILL_FIELDS},
+            **({"filled_at": row["filled_at"]} if row.get("filled_at") else {}),
+        }
+        for row in rows
+        if row["filled_quantity"] > 0
+    ]
 
 
 def _past_fills(account_id: str, day: date) -> list[dict[str, Any]]:
@@ -167,6 +176,7 @@ def _day_trades(
             source,
             row["order_no"],
             order[1] if order else None,
+            filled_at=row.get("filled_at"),
         )
         trades.append((int(row["order_no"]), trade))
     return [trade for _, trade in sorted(trades, key=lambda item: item[0])]

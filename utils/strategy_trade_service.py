@@ -838,16 +838,30 @@ def _trade_badges(
     return badges
 
 
+def _is_recent_24h(trade: Trade, *, cutoff: datetime) -> bool:
+    if not trade.filled_at:
+        return False
+    return datetime.fromisoformat(trade.filled_at) >= cutoff
+
+
 def _realized_summary(ledger: Ledger) -> dict[str, Any]:
-    """원장이 가진 체결에서 실현손익(종목 통화)과 오늘 매수·매도 건수를 모은다.
+    """원장이 가진 체결에서 실현손익(종목 통화)과 오늘(미장은 최근 24시간) 매수·매도 건수를 모은다.
 
     실현손익은 기록을 시작한 날(`REALIZED_RECORDED_SINCE`) 이후 보관 기간 안의 매도만 더한다. 그 뒤인데도 팔린 로트의
     체결가를 몰라 값이 없는 매도는 합계에 넣지 않고 건수(`realized_unknown_sells`)로 알린다.
     """
     sells = [trade for trade in ledger.trades if not trade.buy and trade.day >= REALIZED_RECORDED_SINCE]
-    today_trades = [trade for trade in ledger.trades if trade.day == ledger.market_date]
+    if ledger.country == "us":
+        cutoff = datetime.now(KST) - timedelta(hours=24)
+        today_trades = [trade for trade in ledger.trades if _is_recent_24h(trade, cutoff=cutoff)]
+    else:
+        today_trades = [trade for trade in ledger.trades if trade.day == ledger.market_date]
     return {
-        "realized_today": sum(t.realized for t in sells if t.day == ledger.market_date and t.realized is not None),
+        "realized_today": sum(
+            t.realized
+            for t in today_trades
+            if not t.buy and t.day >= REALIZED_RECORDED_SINCE and t.realized is not None
+        ),
         "realized_recent": sum(t.realized for t in sells if t.realized is not None),
         "realized_unknown_sells": sum(1 for t in sells if t.realized is None),
         "today_buy_count": sum(1 for t in today_trades if t.buy),

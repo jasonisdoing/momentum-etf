@@ -688,7 +688,6 @@ function sumTradeCounts(
 function tradeCountColumn(
   field: "todayTradeCount" | "recentTradeCount",
   headerName: string,
-  periodLabel: string,
   headerTooltip: string,
 ): ColDef<TradeListRow> {
   return {
@@ -711,7 +710,7 @@ function tradeCountColumn(
       if (count.buy > 0) parts.push({ text: `${count.buy}회 매수`, color: "var(--up-color, #d64545)" });
       if (count.sell > 0) parts.push({ text: `${count.sell}회 매도`, color: "var(--down-color, #2f6fd0)" });
       return (
-        <span style={{ whiteSpace: "nowrap" }} title={`${periodLabel} ${parts.map((p) => p.text).join(", ")}`}>
+        <span style={{ whiteSpace: "nowrap" }}>
           {parts.map((part, index) => (
             <span key={part.text}>
               {index > 0 ? <span style={{ color: "var(--text-muted)" }}>, </span> : null}
@@ -1152,8 +1151,12 @@ function AccountSettingsCard({
         } as ColDef<TradeListRow>,
         ...(column.field === "pct"
           ? [
-            tradeCountColumn("todayTradeCount", "거래(오늘)", "오늘", "오늘 매수 / 매도 체결 횟수"),
-            tradeCountColumn("recentTradeCount", "거래(30일)", "최근 30일", "최근 30일(달력) 매수 / 매도 체결 횟수"),
+            tradeCountColumn(
+              "todayTradeCount",
+              view.country_code === "us" ? "거래(최근24시간)" : "거래(오늘)",
+              view.country_code === "us" ? "최근 24시간 매수 / 매도 체결 횟수" : "오늘 매수 / 매도 체결 횟수",
+            ),
+            tradeCountColumn("recentTradeCount", "거래(30일)", "최근 30일(달력) 매수 / 매도 체결 횟수"),
           ]
           : []),
         // 회차금액 옆 읽기 전용 — 지금 현재가로 그 금액이 몇 주인지.
@@ -1206,7 +1209,7 @@ function AccountSettingsCard({
       valueGetter: (row) => (row?.is_label || row?.key === TOTAL_ROW_KEY || row?.key === TRADE_TOTAL_ROW_KEY ? null : row?.mdd_pct),
       isPartial: (row) => Boolean(row?.gap_partial),
     }),
-  ], [saving, onOpenSignal, updateRow, view.recommended_gap_months, view.recommended_gap_rounds]);
+  ], [saving, onOpenSignal, updateRow, view.country_code, view.recommended_gap_months, view.recommended_gap_rounds]);
 
   const tradeRowClass = ({ data }: RowClassParams<TradeListRow>) => [
     data?.is_group || data?.key === TOTAL_ROW_KEY || data?.key === TRADE_TOTAL_ROW_KEY ? "assetsGroupRow" : "",
