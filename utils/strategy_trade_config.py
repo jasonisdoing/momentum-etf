@@ -54,7 +54,16 @@ FIRST_ENTRY_WINDOWS: dict[str, tuple[tuple[time, time], ...]] = {
 }
 
 # 화면에서 편집하는 파라미터 키 — DB 문서에 이 키로 저장된다.
-EDITABLE_CONFIG_KEYS: tuple[str, ...] = ("trigger_pct", "round_size", "rounds", "auto_order")
+TRADE_MODE_MANUAL = "manual"
+TRADE_MODE_AUTO = "auto"
+TRADE_MODE_DISABLED = "disabled"
+TRADE_MODES: tuple[str, ...] = (TRADE_MODE_MANUAL, TRADE_MODE_AUTO, TRADE_MODE_DISABLED)
+TRADE_MODE_OPTIONS: tuple[dict[str, str], ...] = (
+    {"value": TRADE_MODE_MANUAL, "label": "수동"},
+    {"value": TRADE_MODE_AUTO, "label": "자동"},
+    {"value": TRADE_MODE_DISABLED, "label": "비활성화"},
+)
+EDITABLE_CONFIG_KEYS: tuple[str, ...] = ("trigger_pct", "round_size", "rounds", "mode")
 
 # 편집 가능 범위 — 화면 입력과 API 가 같은 한계를 쓴다.
 PCT_MIN, PCT_MAX = 2.0, 50.0
@@ -66,12 +75,12 @@ ROUND_SIZE_MAX = (2**53 - 1) // ROUND_SIZE_UNIT_KRW
 ROUNDS_MIN, ROUNDS_MAX = 0, 20
 
 
-def validate_strategy_trade_config(values: dict[str, Any]) -> dict[str, float | int | bool]:
+def validate_strategy_trade_config(values: dict[str, Any]) -> dict[str, float | int | str]:
     """편집 파라미터를 검증해 정규화된 dict 를 반환한다. 실패 시 ValueError."""
     if not isinstance(values, dict):
         raise ValueError("설정 형식이 올바르지 않습니다.")
 
-    cleaned: dict[str, float | int | bool] = {}
+    cleaned: dict[str, float | int | str] = {}
 
     raw_pct = values.get("trigger_pct")
     if not isinstance(raw_pct, (int, float)) or isinstance(raw_pct, bool):
@@ -94,11 +103,13 @@ def validate_strategy_trade_config(values: dict[str, Any]) -> dict[str, float | 
         raise ValueError(f"'회차 수' 는 {ROUNDS_MIN}~{ROUNDS_MAX} 사이여야 합니다.")
     cleaned["rounds"] = rounds
 
-    # 자동 주문 — 켜면 자동 신호를 슬랙 발송과 함께 버튼 주문과 같은 경로로 바로 주문한다.
-    auto_order = values.get("auto_order")
-    if not isinstance(auto_order, bool):
-        raise ValueError("'자동 주문' 은 참·거짓이어야 합니다.")
-    cleaned["auto_order"] = auto_order
+    # 활성화 모드 — manual(수동) · auto(자동 주문) · disabled(비활성화). 구형 auto_order(bool)도 호환 변환한다.
+    raw_mode = values.get("mode")
+    if raw_mode is None and isinstance(values.get("auto_order"), bool):
+        raw_mode = TRADE_MODE_AUTO if values["auto_order"] else TRADE_MODE_MANUAL
+    if raw_mode not in TRADE_MODES:
+        raise ValueError("'활성화' 는 수동·자동·비활성화 중 하나여야 합니다.")
+    cleaned["mode"] = str(raw_mode)
 
     return cleaned
 

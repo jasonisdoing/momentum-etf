@@ -24,6 +24,9 @@ from utils.strategy_trade_config import (
     ROUNDS_MIN,
     TRADE_COUNTRIES,
     TRADE_CURRENCIES,
+    TRADE_MODE_AUTO,
+    TRADE_MODE_DISABLED,
+    TRADE_MODE_OPTIONS,
     round_buy_quantity,
     validate_strategy_trade_config,
 )
@@ -112,7 +115,9 @@ def load_settings() -> dict[str, Any]:
                 # 미국 종목의 시세·주문 거래소 코드(OQ·NY·AX) — 국장 전략은 없다.
                 "exchange": entry.get("exchange"),
                 "sort_order": entry.get("sort_order"),
-                **validate_strategy_trade_config({key: entry.get(key) for key in EDITABLE_CONFIG_KEYS}),
+                **validate_strategy_trade_config(
+                    {**{key: entry.get(key) for key in EDITABLE_CONFIG_KEYS}, "auto_order": entry.get("auto_order")}
+                ),
             }
         except ValueError as error:
             raise ValueError(f"'{sid}' 전략 설정이 올바르지 않습니다: {error}") from error
@@ -358,13 +363,15 @@ def _save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, gr
 
 
 def _change_note(previous: dict[str, Any], target: dict[str, Any]) -> str | None:
-    """신호 판정·주문 방식이 달라졌으면 변경 내용 문구, 아니면 None."""
+    """신호 판정·활성화가 달라졌으면 변경 내용 문구, 아니면 None."""
     parts = []
     if previous["trigger_pct"] != target["trigger_pct"]:
         parts.append(f"간격 {previous['trigger_pct']:g}% → {target['trigger_pct']:g}%")
     if previous["round_size"] != target["round_size"]:
         parts.append(f"회차 금액 {previous['round_size']:,}만원 → {target['round_size']:,}만원")
-    if not previous.get("auto_order") and target.get("auto_order"):
+    if previous.get("mode") != TRADE_MODE_DISABLED and target.get("mode") == TRADE_MODE_DISABLED:
+        parts.append("비활성화")
+    elif previous.get("mode") != TRADE_MODE_AUTO and target.get("mode") == TRADE_MODE_AUTO:
         parts.append("자동 주문 켜짐")
     return " · ".join(parts) or None
 
@@ -875,7 +882,7 @@ def _build_strategy_view(
     round_size = int(strategy_settings["round_size"])
     rate = krw_rate(country)
     max_rounds = int(strategy_settings["rounds"])
-    auto_order = bool(strategy_settings["auto_order"])
+    mode = str(strategy_settings["mode"])
     exchange = strategy_settings["exchange"]
     if country == "us" and not exchange:
         raise ValueError("이 종목의 거래소가 저장돼 있지 않습니다 — 전략을 다시 저장하세요.")
@@ -1050,7 +1057,7 @@ def _build_strategy_view(
             "round_size": round_size,
             "rounds": max_rounds,
             "index_name": name,
-            "auto_order": auto_order,
+            "mode": mode,
         },
         "index": index_status,
         "cash": cash,
@@ -1123,7 +1130,9 @@ def refresh_all_ledgers() -> dict[str, str]:
     from services.broker_api_service import BrokerApiError
 
     started_at = datetime.now(KST).isoformat()
-    strategies = load_settings()["strategies"]
+    strategies = {
+        sid: entry for sid, entry in load_settings()["strategies"].items() if entry["mode"] != TRADE_MODE_DISABLED
+    }
     failed: dict[str, str] = {}
     for account_id, tickers in _tickers_by_account(strategies).items():
         try:
@@ -1157,7 +1166,7 @@ def _failed_view(
             "round_size": entry["round_size"],
             "rounds": entry["rounds"],
             "index_name": label,
-            "auto_order": entry["auto_order"],
+            "mode": entry["mode"],
         },
         "error": str(error),
         "rounds": [],
@@ -1277,7 +1286,11 @@ def load_views_where(keep: Callable[[dict[str, Any]], bool], *, fresh: bool) -> 
     회차 원장을 못 만든 전략은 `strategies` 에서 빼고 `errors`(전략 id → 이유)에 담는다 — 그 전략만 건너뛴다.
     """
     views = _build_views(
-        {sid: entry for sid, entry in load_settings()["strategies"].items() if keep(entry)},
+        {
+            sid: entry
+            for sid, entry in load_settings()["strategies"].items()
+            if entry["mode"] != TRADE_MODE_DISABLED and keep(entry)
+        },
         fresh=fresh,
         include_trade_history=False,
     )
@@ -1292,6 +1305,8 @@ def load_strategy_view(strategy_id: str, *, fresh: bool) -> dict[str, Any] | Non
     entry = load_settings()["strategies"].get(strategy_id)
     if entry is None:
         return None
+    if entry["mode"] == TRADE_MODE_DISABLED:
+        return {"error": f"{entry['name']}({entry['ticker']}) 전략이 비활성화 상태입니다."}
     view = _build_views({strategy_id: entry}, fresh=fresh, include_trade_history=False)[0]
     if "error" in view:
         return {"error": view["error"]}
@@ -1466,6 +1481,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         "pool_options": pool_options(list(pools)),
         "ticker_options": [options[ticker] for ticker in sorted(options)],
         "default_round_size": DEFAULT_ROUND_SIZE,
+        "mode_options": list(TRADE_MODE_OPTIONS),
         "pct_min": PCT_MIN,
         "pct_max": PCT_MAX,
         "rounds_min": ROUNDS_MIN,
@@ -1483,7 +1499,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
                 "trigger_pct": entry["trigger_pct"],
                 "round_size": entry["round_size"],
                 "rounds": entry["rounds"],
-                "auto_order": entry["auto_order"],
+                "mode": entry["mode"],
                 "price": quotes.get(entry["ticker"], {}).get("price"),
                 "change_pct": quotes.get(entry["ticker"], {}).get("change_pct"),
                 "drawdown_pct": quotes.get(entry["ticker"], {}).get("drawdown_pct"),
@@ -1496,7 +1512,11 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
             }
             for sid, entry in configs
         ],
-        "strategies": _build_views(mine, fresh=False, include_trade_history=True),
+        "strategies": _build_views(
+            {sid: entry for sid, entry in mine.items() if entry["mode"] != TRADE_MODE_DISABLED},
+            fresh=False,
+            include_trade_history=True,
+        ),
         # 종목 메모(티커 → 메모) — 저장된 전략과 새로 고를 수 있는 종목 모두. 메모가 없는 종목은 빠진다.
         "memos": get_stock_memos([*options, *(entry["ticker"] for entry in mine.values())]),
     }

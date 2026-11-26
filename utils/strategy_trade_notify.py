@@ -1021,6 +1021,8 @@ def _manual_signal(payload: dict[str, Any], *, fresh: bool) -> tuple[dict[str, A
     setting = load_settings()["strategies"].get(sid)
     if setting is None or setting["account_id"] != account_id:
         raise ValueError("계좌의 전략을 찾을 수 없습니다.")
+    if setting.get("mode") == "disabled":
+        raise ValueError("비활성화된 전략에서는 슬랙 신호를 보낼 수 없습니다.")
     strategy = _order_strategy(account_id, setting["pool"], sid, fresh=fresh)
     require_order_session(strategy, now=datetime.now(KST))
     row = _require_round_state(strategy, side, round_no)

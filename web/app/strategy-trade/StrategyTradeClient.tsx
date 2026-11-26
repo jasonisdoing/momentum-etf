@@ -36,7 +36,6 @@ import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { useStockMemoSave } from "../components/useStockMemoSave";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
-import { GRID_CHECKBOX_CELL_STYLE, GridCheckbox } from "../components/GridCheckbox";
 
 type StrategyConfig = {
   // 매매 간격(%) 하나로 진입·추가·매도를 모두 관리한다.
@@ -179,6 +178,14 @@ export type FailedStrategy = {
   error: string;
 };
 
+type TradeMode = "manual" | "auto" | "disabled";
+
+const TRADE_MODE_OPTIONS: ReadonlyArray<{ value: TradeMode; label: string }> = [
+  { value: "manual", label: "수동" },
+  { value: "auto", label: "자동" },
+  { value: "disabled", label: "비활성화" },
+];
+
 /** 저장된 전략 설정 한 줄 — 편집 표의 행. */
 type StrategyConfigRow = {
   strategy_id: string;
@@ -187,8 +194,8 @@ type StrategyConfigRow = {
   trigger_pct: number;
   round_size: number;
   rounds: number;
-  /** 자동 주문 — 켜면 자동 신호가 슬랙 발송과 함께 버튼 주문과 같은 경로로 바로 주문된다. */
-  auto_order: boolean;
+  /** 활성화 모드 — 수동(슬랙/웹 확인) · 자동(신호 즉시 주문) · 비활성화(제외). */
+  mode: TradeMode;
   /** 현재가·일간(%) — 공통 시세 경로 값. 못 받으면 null. */
   price: number | null;
   change_pct: number | null;
@@ -221,6 +228,7 @@ type View = {
   groups: HoldingsGroup[];
   pool_options: PoolLabelSource[];
   default_round_size: number;
+  mode_options?: Array<{ value: TradeMode; label: string }>;
   pct_min: number;
   pct_max: number;
   rounds_min: number;
@@ -609,7 +617,7 @@ type DraftRow = {
   pct: string;
   amount: string;
   rounds: string;
-  auto: boolean;
+  mode: TradeMode;
 };
 
 let draftKeySeq = 0;
@@ -627,14 +635,14 @@ function rowFromConfig(config: StrategyConfigRow): DraftRow {
     pct: String(config.trigger_pct),
     amount: String(config.round_size),
     rounds: String(config.rounds),
-    auto: config.auto_order,
+    mode: config.mode ?? "manual",
   };
 }
 
 /** 변경 비교용 — 입력 중 문자열을 저장 값 모양으로 맞춘다. */
 function comparableDrafts(rows: DraftRow[]) {
   return rows.map((row) => [
-    row.strategy_id, row.ticker, Number(row.pct), Number(row.amount), Number(row.rounds), row.auto,
+    row.strategy_id, row.ticker, Number(row.pct), Number(row.amount), Number(row.rounds), row.mode,
   ]);
 }
 
@@ -797,7 +805,7 @@ function displayWeights(values: number[], total: number): number[] {
 }
 
 function tradeListLabel(key: string, name: string): TradeListRow {
-  return { key, ticker: "", name, strategy_id: null, pct: "", amount: "", rounds: "", auto: false, held: false, heldRounds: "", heldFull: false, is_label: true };
+  return { key, ticker: "", name, strategy_id: null, pct: "", amount: "", rounds: "", mode: "manual", held: false, heldRounds: "", heldFull: false, is_label: true };
 }
 
 const tradeSettingColumns = [
@@ -944,7 +952,8 @@ function AccountSettingsCard({
       const price = quote?.price ?? null;
       // 손익은 회차 기준(아래 손익 요약과 같은 값) — 증권사 평균단가(이동평균) 기준 평가손익을 덮는다.
       const rate = view.krw_rate;
-      const validStrategy = strategy && strategy.ticker === row.ticker && !("error" in strategy) ? strategy : undefined;
+      const isDisabled = row.mode === "disabled";
+      const validStrategy = !isDisabled && strategy && strategy.ticker === row.ticker && !("error" in strategy) ? strategy : undefined;
       const pnl = validStrategy && rate != null ? validStrategy.history_summary : undefined;
       const status = validStrategy?.status;
       return {
@@ -960,7 +969,7 @@ function AccountSettingsCard({
           ? { buy: status.recent_buy_count, sell: status.recent_sell_count }
           : undefined,
         memo: memos[row.ticker] ?? "",
-        statusRounds: strategy && strategy.ticker === row.ticker && !("error" in strategy) ? strategy.rounds.filter(hasRoundStatus) : [],
+        statusRounds: validStrategy ? validStrategy.rounds.filter(hasRoundStatus) : [],
         current_price: price == null ? undefined : String(price),
         daily_change_pct: quote?.change_pct,
         drawdown_pct: quote?.drawdown_pct,
@@ -976,17 +985,18 @@ function AccountSettingsCard({
           price != null && view.krw_rate != null && Number.isSafeInteger(Number(row.amount))
             ? Math.floor((Number(row.amount) * 10_000) / (price * view.krw_rate))
             : null,
-        held: Boolean(strategy && strategy.ticker === row.ticker && !("error" in strategy) && strategy.status.held_quantity > 0),
-        heldRounds: !strategy || strategy.ticker !== row.ticker
-          ? "미저장"
-          : "error" in strategy ? "오류" : `${strategy.status.held_count}/${strategy.config.rounds}`,
-        heldFull: Boolean(strategy && strategy.ticker === row.ticker && !("error" in strategy)
-          && strategy.status.held_count >= strategy.config.rounds),
+        held: Boolean(validStrategy && validStrategy.status.held_quantity > 0),
+        heldRounds: isDisabled
+          ? "비활성화"
+          : !strategy || strategy.ticker !== row.ticker
+            ? "미저장"
+            : "error" in strategy ? "오류" : `${strategy.status.held_count}/${strategy.config.rounds}`,
+        heldFull: Boolean(validStrategy && validStrategy.status.held_count >= validStrategy.config.rounds),
       };
     });
     const summary = accountAssets?.summary;
     const stockValues = stockRows.map((row) => row.valuation_krw ?? 0);
-    const strategyTickers = new Set(drafts.map((row) => row.ticker));
+    const strategyTickers = new Set(drafts.filter((row) => row.mode !== "disabled").map((row) => row.ticker));
     const holdings = accountAssets && [...accountAssets.holdings.values()];
     const totalHoldings = holdings ? sumTradeHoldings(holdings) : undefined;
     const otherHoldings = holdings ? sumTradeHoldings(holdings.filter((row) => !strategyTickers.has(row.ticker))) : undefined;
@@ -1085,25 +1095,34 @@ function AccountSettingsCard({
       }),
       pinned: "left",
     },
-    // 자동 주문 — 켠 전략만 자동 신호를 버튼 주문과 같은 경로로 바로 주문한다(저장 버튼으로 반영).
+    // 활성화 — 수동·자동·비활성화 선택(비활성화 시 사고팔기 판정·알림·집계에서 제외).
     {
-      colId: "auto",
-      field: "auto",
-      headerName: "자동",
-      headerTooltip: "켜면 자동 신호를 슬랙 발송과 함께 바로 주문한다 — 저장 버튼을 눌러야 반영된다",
-      width: 56,
+      colId: "mode",
+      field: "mode",
+      headerName: "활성화",
+      headerTooltip: "수동: 슬랙/웹 확인 주문 · 자동: 신호 시 즉시 주문 · 비활성화: 사고팔기 제외",
+      width: 118,
       pinned: "left",
       sortable: false,
       editable: false,
-      cellStyle: GRID_CHECKBOX_CELL_STYLE,
+      cellStyle: { display: "flex", alignItems: "center", paddingLeft: 4, paddingRight: 4 },
       cellRenderer: ({ data, node }: { data?: TradeListRow; node: { rowPinned?: unknown } }) =>
         !data || node.rowPinned || data.is_label || data.is_group ? null : (
-          <GridCheckbox
-            checked={data.auto}
+          <select
+            className="form-select form-select-sm"
+            aria-label={`${data.name} 활성화`}
+            value={data.mode}
             disabled={saving}
-            label={`${data.name} 자동 주문`}
-            onChange={(checked) => updateRow(data.key, { auto: checked })}
-          />
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => updateRow(data.key, { mode: event.target.value as TradeMode })}
+            style={{ width: "100%", paddingTop: 2, paddingBottom: 2 }}
+          >
+            {(view.mode_options ?? TRADE_MODE_OPTIONS).map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         ),
     } satisfies ColDef<TradeListRow>,
     { ...dailyChange, pinned: "left" },
@@ -1191,7 +1210,7 @@ function AccountSettingsCard({
 
   const tradeRowClass = ({ data }: RowClassParams<TradeListRow>) => [
     data?.is_group || data?.key === TOTAL_ROW_KEY || data?.key === TRADE_TOTAL_ROW_KEY ? "assetsGroupRow" : "",
-    stockRowClass({ held: data?.held }),
+    stockRowClass({ held: data?.held, trendBroken: data?.mode === "disabled" }),
     data?.key === selectedRow?.key ? "strategyTradeSelectedRow" : "",
   ].filter(Boolean).join(" ");
   const accountRows = pinnedRows.filter((row) => row.key !== TRADE_TOTAL_ROW_KEY);
@@ -1236,7 +1255,7 @@ function AccountSettingsCard({
     const key = nextDraftKey();
     setDrafts((prev) => [
       ...prev,
-      { key, strategy_id: null, ticker: option.ticker, name: option.name, pct: "5", amount: String(view.default_round_size), rounds: "4", auto: false },
+      { key, strategy_id: null, ticker: option.ticker, name: option.name, pct: "5", amount: String(view.default_round_size), rounds: "4", mode: "manual" },
     ]);
     setSelection({ accountId, ticker: option.ticker });
     setPickerOpen(false);
@@ -1288,7 +1307,7 @@ function AccountSettingsCard({
         trigger_pct: pct,
         round_size: amount,
         rounds,
-        auto_order: row.auto,
+        mode: row.mode,
       });
     }
     setSaving(true);
