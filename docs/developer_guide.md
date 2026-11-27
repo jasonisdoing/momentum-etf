@@ -39,7 +39,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `/strategy-momentum` | 모멘텀 전략(주간) 선정·백테스트·튜닝 | `utils/momentum_service.py`, `momentum_backtest.py`, `momentum_tuning.py` |
 | `/strategy-new-high` | 신고가 전략 선정·백테스트·튜닝 | `utils/new_high_service.py`, `new_high_backtest.py`, `new_high_tuning.py` |
 | `/strategy-mix` | 계좌 평가액 기준 합성 운용 — 회수·채우기(합성 백테스트 없음, 백테스트는 각 전략 화면에만 있다) | `utils/strategy_mix_service.py`(계좌·슬리브 설정), `utils/strategy_mix_positions.py`(목표·액션), `utils/mix_sleeve.py`(전략별 현재 상태 어댑터) |
-| `/strategy-trade` | 계좌별 분할 매매 전략(합성과 별도, 백테스트 없음). 설정은 `system_config.strategy_trade_settings`, 판단·가격·호가는 `core/strategy/trade/rules.py`와 `strategy_trade_market.py`가 단일 소스다. 회차는 증권사 체결을 재생한 원장(`strategy_trade_ledgers`)으로 정하며, 기준점(`strategy_trade_ledger_anchors`)·일별 체결(`strategy_trade_day_fills`)을 계좌별로 보관한다. 배치는 원장을 갱신하고 화면은 저장본을 읽으며 실제 주문 직전에는 다시 검증한다. 잔고와 원장이 맞지 않으면 오류로 막는다. 자동·수동 신호는 같은 Slack 주문·회수 경로를 사용하며, 화면 수동 주문은 Slack 신호를 남긴 뒤 버튼 확인과 같은 경로로 바로 주문한다. | `utils/strategy_trade_service.py`, `strategy_trade_notify.py`, `strategy_trade_threads.py`, `strategy_trade_ledger.py`, `core/strategy/trade/` |
+| `/strategy-trade` | 계좌별 분할 매매 전략(합성과 별도, 백테스트 없음). 설정은 `system_config.strategy_trade_settings`, 판단·가격·호가는 `core/strategy/trade/rules.py`와 `strategy_trade_market.py`가 단일 소스다. 회차는 증권사 체결을 재생한 원장(`strategy_trade_ledgers`)으로 정하며, 기준점(`strategy_trade_ledger_anchors`)·일별 체결(`strategy_trade_day_fills`)을 계좌별로 보관한다. 배치는 원장을 갱신하고 화면은 저장본을 읽으며 실제 주문 직전에는 다시 검증한다. 잔고와 원장이 맞지 않으면 오류로 막는다. 자동·수동 신호는 같은 Slack 주문·회수 경로를 사용하며, 화면 수동 주문은 `/internal/strategy-trade/manual-order`에서 확인한 뒤 공통 주문 경로로 바로 실행하며 Slack에 결과를 남긴다. | `utils/strategy_trade_service.py`, `strategy_trade_notify.py`, `strategy_trade_threads.py`, `strategy_trade_ledger.py`, `core/strategy/trade/` |
 | `/leverage-settings` | 레버리지 이동평균 크로스 설정·튜닝 | `leverage/` |
 | `/account-settings` | 계좌 메타·증권사 연동·합성 슬리브·보유종목 알림. 운영 계좌 목록은 `load_live_account_docs`를 공유하며 숨김 계좌를 제외한다. 현금·보유·원금이 모두 0인 계좌만 숨길 수 있다. | `utils/account_settings_store.py`, `utils/holdings_alarm_service.py`, `services/broker_api_service.py` |
 | `/assets`, `/holdings*` | 자산·보유 | `utils/holdings_detail_service.py`, `portfolio_master` |
@@ -73,7 +73,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 
 원장·기준점은 조회 시작 시각으로 오래된 조회의 덮어쓰기를 막는다. 기준점 복구는 최근 조회 범위에서 해결되지 않을 때 연속된 과거 체결 캐시로 확장하며, 보유가 0이던 시점과 현재 잔고의 일치를 확인해야 한다. 캐시가 끊기면 가격을 추정하지 않는다. 설정 저장 시 원장 확인은 총 회차 수를 줄이는 경우에만 필요하고, 원장이 불명확한 종목의 주문 차단은 유지한다. 계좌·종목·회차·방향의 활성 신호는 하나이며 발송 예약을 전송 전에 저장한다. 전송 결과가 불명확하면 자동 재발송하지 않는다. 예약 키를 바꾸는 배포는 이전 버전의 신호 작업을 종료한 뒤 교체해야 한다.
 
-`strategy_trade_slack_messages`의 신호 원본은 완료·회수 여부의 단일 소스이며 완료 후에도 재주문 방지를 위해 보존한다. 미발주 수동 신호와 답글은 TTL·세션 정리에서 제외한다. 주문 만료 시 체결 수량과 무관하게 활성 발송 기록만 종료하며, 원본은 `signal_expired`로 재주문을 막고 주문 이력과 함께 보존한다. 이 종료 판정은 화면·배치·새 수동 발송이 공유한다. 자동 일반 답글은 `expires_at` TTL을 사용하며 기존 `created_at` TTL은 초기화 시 교체한다. 체결 출처는 주문 기록에서 원장으로 전달하며 직접 거래와 수동 Slack은 수동 거래로, 자동 Slack은 자동 거래로 분류한다.
+`strategy_trade_slack_messages`의 신호 원본은 완료·회수 여부의 단일 소스이며 완료 후에도 재주문 방지를 위해 보존한다. 미발주 수동 신호와 답글은 TTL·세션 정리에서 제외한다. 주문 만료 시 체결 수량과 무관하게 활성 발송 기록만 종료하며, 원본은 `signal_expired`로 재주문을 막고 주문 이력과 함께 보존한다. 이 종료 판정은 화면·배치·새 수동 발송이 공유한다. 자동 일반 답글은 `expires_at` TTL을 사용하며 기존 `created_at` TTL은 초기화 시 교체한다. 체결 출처는 주문 기록에서 원장으로 전달한다. 화면에서 확인 후 바로 실행한 회차 주문은 `manual_order`, 회차 없는 API 직접 주문은 `api`, 증권사 직접 거래는 `manual`로 구분하며 표시·필터는 이 출처를 공유한다. 과거 수동 확인 주문도 수동 주문으로 보존한다. 주문 출처·API 경로 변경은 저장 이력 이전과 프론트·백엔드의 동시 반영이 필요하다.
 
 ## 3. DB 단일 소스
 

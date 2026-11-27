@@ -42,7 +42,7 @@ from utils.logger import get_app_logger
 from utils.market_session import is_instrument_trading_time, trading_time_closed_message
 from utils.portfolio_io import return_pct_from_avg_price
 from utils.strategy_trade_config import round_buy_quantity
-from utils.strategy_trade_ledger import REGULAR_SELL, SOURCE_API, SOURCE_AUTO, is_buy
+from utils.strategy_trade_ledger import REGULAR_SELL, SOURCE_API, SOURCE_AUTO, SOURCE_MANUAL_ORDER, is_buy
 from utils.strategy_trade_market import (
     broker_order_date,
     close_text,
@@ -398,7 +398,7 @@ def _buy_quantity(strategy: dict[str, Any], price: int, account_id: str, rate: f
 
 
 def require_order_session(instrument: dict[str, Any], *, now: datetime) -> None:
-    """수동 신호 발송과 주문 확인은 종목별 공통 거래 시간을 따른다."""
+    """수동 주문 확인과 실행은 종목별 공통 거래 시간을 따른다."""
     if not is_instrument_trading_time(instrument["country"], instrument["instrument_kind"], now=now):
         raise BrokerApiError(trading_time_closed_message(instrument["country"], instrument["instrument_kind"], now=now))
 
@@ -560,7 +560,7 @@ def _record_base(
 
     if slack is not None and round_no is not None:
         _require_current_signal(slack["thread_ts"], account_id, pool, strategy_id, round_no)
-    origin = "manual_slack" if slack and signal_is_manual(slack["thread_ts"]) else "slack"
+    origin = SOURCE_MANUAL_ORDER if slack and signal_is_manual(slack["thread_ts"]) else "slack"
     return {
         "signal_origin": origin,
         "env": env,

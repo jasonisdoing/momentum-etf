@@ -450,7 +450,7 @@ class OverseasOrderStateTest(TestCase):
         self.raw.update(ncnt_qty=3, oder_able_qty=3)
         rows = self.broker.list_order_states("a1", "20261124")
         with patch.object(order_store, "_orders", return_value=self.store):
-            result = ledger._manual_orders(rows, ["DIVB"], {("20261124", "776692"): ("manual_slack", None)}, "a1")
+            result = ledger._manual_orders(rows, ["DIVB"], {("20261124", "776692"): ("manual_order", None)}, "a1")
         self.assertEqual(result["DIVB"][0]["source"], "api")
         strategy = {"manual_orders": result["DIVB"], "label": "DIVB"}
         with self.assertRaisesRegex(BrokerApiError, "미체결"):

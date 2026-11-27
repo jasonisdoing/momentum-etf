@@ -83,7 +83,7 @@ type Status = {
 type TradeSide = "buy" | "sell" | "arbitrary_buy" | "arbitrary_sell";
 /** 회차 표의 체결 뱃지 — 짝 번호(`pairs`)는 매수는 자기 번호, 매도는 판 매수의 번호다(최근 30일 안 매수만). */
 /** 체결 출처 — 백엔드 `strategy_trade_ledger.SOURCE_*`. */
-type FillSource = "auto" | "slack" | "manual_slack" | "api" | "manual";
+type FillSource = "auto" | "slack" | "manual_order" | "api" | "manual";
 type TradeBadge = { side: TradeSide; pairs: number[]; source: FillSource; seq?: number; price?: number; shares?: number };
 
 const FILL_LABELS = {
@@ -501,11 +501,11 @@ function RoundStatus({
 // 매수는 보라, 매도는 주황 — 빨강·파랑은 상승·하락 손익색이라 헷갈리고 초록은 슬랙·주문 표시가 쓴다.
 const FILL_COLORS = { buy: "var(--tblr-purple, #ae3ec9)", sell: "var(--tblr-orange, #f76707)" } as const;
 
-// AUTO 자동 주문 · SLACK 자동 신호를 버튼으로 · MANUAL 앱 안 수동(수동 신호·API 주문 모달) · MTS 앱 기록 없는 직접 주문.
+// AUTO 자동 주문 · SLACK 자동 신호를 버튼으로 · MANUAL 화면에서 확인 후 바로 주문(회차 주문·API 주문 모달) · MTS 앱 기록 없는 직접 주문.
 const FILL_SOURCE_WORDS: Record<FillSource, string> = {
   auto: "AUTO",
   slack: "SLACK",
-  manual_slack: "MANUAL",
+  manual_order: "MANUAL",
   api: "MANUAL",
   manual: "MTS",
 };
@@ -1578,16 +1578,16 @@ function useStickyLefts(count: number) {
   return { headRowRef, stickyCell };
 }
 
-type ManualSignalPreview = {
+type ManualOrderPreview = {
   account_id: string; account_name: string; strategy_id: string; ticker: string; name: string;
   round: number; side: "buy" | "sell"; price: number; quantity: number; token: string;
 };
 
 /** 서버에서 확인한 수동 주문 — Slack 신호를 남기고 자동 주문과 같은 호가(같은 쪽 1호가 지정가)로 바로 주문한다. */
-function ManualSignalButton({ view, row, onSent }: { view: StrategyView; row: RoundRow; onSent: () => Promise<void> }) {
+function ManualOrderButton({ view, row, onSent }: { view: StrategyView; row: RoundRow; onSent: () => Promise<void> }) {
   const currency = useTradeCurrency();
   const toast = useToast();
-  const [preview, setPreview] = useState<ManualSignalPreview | null>(null);
+  const [preview, setPreview] = useState<ManualOrderPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const side = row.held && row.round === view.status.held_count ? "sell" : row.is_next ? "buy" : null;
   if (side === null) return null;
@@ -1595,7 +1595,7 @@ function ManualSignalButton({ view, row, onSent }: { view: StrategyView; row: Ro
   const ordered = row.order_sides.includes(side) || row.manual_orders.some((order) => order.side === side);
   const request = { account_id: view.account_id, strategy_id: view.strategy_id, round: row.round, side };
   const call = async (path: string, body: object) => {
-    const response = await fetch(`/api/strategy-trade/manual-signal${path}`, {
+    const response = await fetch(`/api/strategy-trade/manual-order${path}`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     const result = await response.json();
@@ -1608,12 +1608,12 @@ function ManualSignalButton({ view, row, onSent }: { view: StrategyView; row: Ro
     catch (error) { toast.error(error instanceof Error ? error.message : "주문 확인 실패"); }
     finally { setBusy(false); }
   };
-  const send = async () => {
+  const submit = async () => {
     if (!preview) return;
     setBusy(true);
     try {
       const result = await call("", preview);
-      toast.success(result.duplicate ? "이미 발송된 신호가 있습니다." : "수동 주문을 냈습니다. 결과는 Slack 스레드로 알립니다.");
+      toast.success(result.duplicate ? "같은 회차·방향의 주문 요청이 이미 있습니다." : "수동 주문을 냈습니다. 결과는 Slack 스레드로 알립니다.");
       setPreview(null);
       await onSent();
     } catch (error) {
@@ -1625,13 +1625,13 @@ function ManualSignalButton({ view, row, onSent }: { view: StrategyView; row: Ro
   return (
     <>
       <button type="button" className="btn btn-sm" disabled={active || ordered || busy}
-        title={active ? "이미 발송된 신호가 있습니다" : ordered ? "진행 중인 주문이 있습니다" : "현재 호가로 바로 주문"}
+        title={active ? "이미 처리 중인 주문 요청이 있습니다" : ordered ? "진행 중인 주문이 있습니다" : "현재 호가로 바로 주문"}
         onClick={() => void prepare()}>{SIDE_WORDS[side]}주문</button>
       <AppModal open={preview !== null} title={`${SIDE_WORDS[side]}주문 확인`}
         onClose={() => { if (!busy) setPreview(null); }}
         footer={<div style={{ display: "flex", justifyContent: "flex-end", gap: 8, width: "100%" }}>
           <button type="button" className="btn" disabled={busy} onClick={() => setPreview(null)}>취소</button>
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void send()}>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void submit()}>
             {busy ? "주문 중…" : "확인 후 주문"}
           </button>
         </div>}>
@@ -1640,7 +1640,7 @@ function ManualSignalButton({ view, row, onSent }: { view: StrategyView; row: Ro
           <dt>종목</dt><dd>{preview.name} ({preview.ticker})</dd>
           <dt>회차</dt><dd>{preview.round}호</dd>
           <dt>방향</dt><dd>{SIDE_WORDS[preview.side]}</dd>
-          <dt>신호 가격</dt><dd>{formatPrice(preview.price, currency)}</dd>
+          <dt>기준 가격</dt><dd>{formatPrice(preview.price, currency)}</dd>
           <dt>예상 수량</dt><dd>{preview.quantity.toLocaleString()}주</dd>
         </dl> : null}
         <p>확인하면 지금의 {preview?.side === "sell" ? "매도" : "매수"} 1호가 지정가로 바로 주문합니다(자동 주문과 같은 호가). 접수·체결 결과는 Slack 스레드로 알립니다.</p>
@@ -1891,7 +1891,7 @@ function StrategySection({
                     <td style={{ ...tdStyle, color: "var(--text-muted)", ...stickyCell(3) }}>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                         <span>{formatPrice(view.position_prices[String(position)], currency)}</span>
-                        <ManualSignalButton view={view} row={row} onSent={onSignalSent} />
+                        <ManualOrderButton view={view} row={row} onSent={onSignalSent} />
                       </div>
                     </td>
                     <td style={{ ...tdStyle, ...stickyCell(4) }}>

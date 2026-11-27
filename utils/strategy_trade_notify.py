@@ -1,7 +1,7 @@
-"""사고팔기 자동·수동 Slack 신호의 공통 생명주기.
+"""사고팔기 자동 신호와 화면 수동 주문의 공통 생명주기.
 
 자동 신호는 거래 시간과 가격 조건을 따르고 세션·가격 복귀 때 미사용 메시지를 회수한다.
-수동 신호는 직접 회수 전까지 유지한다. 발송·회수는 DB 선점으로 직렬화하고,
+화면 수동 주문은 확인 후 바로 실행하고 Slack 스레드에 결과를 남긴다. 발송·회수는 DB 선점으로 직렬화하고,
 발송 전에 예약을 기록해 응답 불명 상태의 재전송을 막는다.
 체결은 주문 기록과 원장 체결 순서로 판정하며 완료된 메시지의 재주문을 금지한다.
 """
@@ -996,8 +996,8 @@ def _notify_prepared_view(
     return {"sent": sent_count > 0, "reason": " · ".join(parts), "triggers": fresh_all or triggers}
 
 
-def _manual_signal(payload: dict[str, Any], *, fresh: bool) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """공통 회차 판정·트리거 생성으로 수동 신호와 서버 확인 내용을 만든다."""
+def _manual_order(payload: dict[str, Any], *, fresh: bool) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """공통 회차 판정으로 화면 수동 주문의 대상과 서버 확인 내용을 만든다."""
     import json
     from copy import deepcopy
     from hashlib import sha256
@@ -1057,25 +1057,25 @@ def _manual_signal(payload: dict[str, Any], *, fresh: bool) -> tuple[dict[str, A
     return strategy, trigger, preview
 
 
-def preview_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
-    return _manual_signal(payload, fresh=False)[2]
+def preview_manual_order(payload: dict[str, Any]) -> dict[str, Any]:
+    return _manual_order(payload, fresh=False)[2]
 
 
-def send_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
+def submit_manual_order(payload: dict[str, Any]) -> dict[str, Any]:
     setting = load_settings()["strategies"].get(payload["strategy_id"])
     if setting is None:
         raise ValueError("사고팔기 전략을 찾을 수 없습니다.")
     with signal_lock(setting["account_id"], setting["ticker"]):
-        return _send_manual_signal(payload)
+        return _submit_manual_order(payload)
 
 
-def _send_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
+def _submit_manual_order(payload: dict[str, Any]) -> dict[str, Any]:
     """서버 선점 뒤 Slack 신호를 발송하고 바로 주문한다 — 주문은 Slack 버튼 확인과 같은 경로(현재 같은 쪽 1호가 지정가)다."""
     from utils.slack_mock_orders import send_signal_order_messages
     from utils.strategy_trade_orders import find_duplicate_order, require_order_session
     from utils.strategy_trade_threads import complete_signal_thread, record_signal_thread, send_thread_message
 
-    strategy, trigger, preview = _manual_signal(payload, fresh=True)
+    strategy, trigger, preview = _manual_order(payload, fresh=True)
     if payload.get("token") != preview["token"]:
         raise ValueError("회차 가격·수량이 변경됐습니다. 확인창을 다시 열어 확인하세요.")
     key = _trigger_key(trigger)

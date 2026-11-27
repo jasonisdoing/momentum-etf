@@ -111,7 +111,7 @@ AUTO_ORDER_TAG = "🤖[자동]"
 
 
 def is_auto_trigger(strategy_view: dict[str, Any], trigger: dict[str, Any]) -> bool:
-    """자동 주문 대상 신호인지 — 「자동」을 켠 전략의 자동 신호만. 화면에서 보낸 수동 신호는 버튼으로 둔다."""
+    """자동 주문 대상 신호인지 — 「자동」을 켠 전략의 자동 신호만. 화면 수동 주문은 별도 분기에서 바로 실행한다."""
     return strategy_view["config"].get("mode") == "auto" and trigger.get("origin") != "manual"
 
 

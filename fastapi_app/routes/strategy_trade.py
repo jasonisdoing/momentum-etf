@@ -4,7 +4,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from fastapi_app.dependencies import require_internal_token
 from services.broker_api_service import BrokerApiError
-from utils.strategy_trade_notify import mark_sent_rounds, preview_manual_signal, send_manual_signal, send_test
+from utils.strategy_trade_notify import mark_sent_rounds, preview_manual_order, send_test, submit_manual_order
 from utils.strategy_trade_orders import order_limit_usage
 from utils.strategy_trade_service import (
     load_strategy_trade_view,
@@ -80,20 +80,20 @@ def post_strategy_trade_slack_test(
     return {"sent": True, "count": len(result["triggers"])}
 
 
-@router.post("/manual-signal/preview")
-def post_manual_signal_preview(payload: dict = Body(...), _: None = Depends(require_internal_token)) -> dict:
-    """회차 신호의 계좌·종목·가격·수량을 서버에서 확인한다."""
+@router.post("/manual-order/preview")
+def post_manual_order_preview(payload: dict = Body(...), _: None = Depends(require_internal_token)) -> dict:
+    """수동 주문의 계좌·종목·회차·가격·수량을 서버에서 확인한다."""
     try:
-        return preview_manual_signal(payload)
+        return preview_manual_order(payload)
     except BrokerApiError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/manual-signal")
-def post_manual_signal(payload: dict = Body(...), _: None = Depends(require_internal_token)) -> dict:
-    """확인한 수동 신호를 Slack으로만 보낸다."""
+@router.post("/manual-order")
+def post_manual_order(payload: dict = Body(...), _: None = Depends(require_internal_token)) -> dict:
+    """화면에서 확인한 수동 주문을 실행하고 결과를 Slack 스레드로 알린다."""
     try:
-        return send_manual_signal(payload)
+        return submit_manual_order(payload)
     except BrokerApiError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

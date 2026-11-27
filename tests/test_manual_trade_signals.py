@@ -1,4 +1,4 @@
-"""사용자가 요청한 수동 Slack 신호 생명주기 회귀 검증. 외부 전송·주문·DB는 사용하지 않는다."""
+"""사고팔기 수동 주문과 신호 생명주기 회귀 검증. 외부 전송·주문·DB는 사용하지 않는다."""
 
 import base64
 import json
@@ -124,7 +124,7 @@ class MemoryCollection:
                     node.pop(parts[-1], None)
 
 
-class ManualSignalsTest(TestCase):
+class ManualOrdersTest(TestCase):
     def setUp(self):
         self.config = MemoryCollection()
         self.messages = MemoryCollection()
@@ -235,8 +235,8 @@ class ManualSignalsTest(TestCase):
         return ts
 
     def manual(self):
-        preview = notify.preview_manual_signal(self.payload)
-        return notify.send_manual_signal(preview)
+        preview = notify.preview_manual_order(self.payload)
+        return notify.submit_manual_order(preview)
 
     def test_manual_then_auto_and_repeated_manual(self):
         self.assertTrue(self.manual()["sent"])
@@ -673,10 +673,10 @@ class ManualSignalsTest(TestCase):
                 "slack": {"thread_ts": "1", "message_ts": "1"},
             }
         )
-        old_preview = notify.preview_manual_signal(self.payload)
+        old_preview = notify.preview_manual_order(self.payload)
         self.strategy["rounds"][0]["quantity"] = 6
         with self.assertRaisesRegex(ValueError, "변경"):
-            notify.send_manual_signal(old_preview)
+            notify.submit_manual_order(old_preview)
         self.assertTrue(self.manual()["sent"])
         self.assertEqual(self.sent["s1:1-sell"]["quantity"], 6)
         self.assertEqual(self.sent["s1:1-sell"]["signal_ts"], "2")
@@ -745,10 +745,10 @@ class ManualSignalsTest(TestCase):
         self.assertFalse(notify._entry_filled(self.sent["s1:1-buy"], 1, {1: 100}, []))
 
     def test_price_or_quantity_change_requires_confirmation(self):
-        preview = notify.preview_manual_signal(self.payload)
+        preview = notify.preview_manual_order(self.payload)
         self.strategy["rounds"][0]["quantity"] = 9
         with self.assertRaisesRegex(ValueError, "변경"):
-            notify.send_manual_signal(preview)
+            notify.submit_manual_order(preview)
         self.sender.assert_not_called()
 
     def test_ambiguous_send_not_retried(self):
@@ -771,15 +771,15 @@ class ManualSignalsTest(TestCase):
         self.assertEqual(self.sender.call_count, 2)
 
     def test_closed_session_blocks_preview_send_and_existing_slack_order(self):
-        preview = notify.preview_manual_signal(self.payload)
+        preview = notify.preview_manual_order(self.payload)
         with (
             patch.object(orders, "is_instrument_trading_time", return_value=False),
             patch.object(orders, "fetch_best_quote") as quote,
         ):
             with self.assertRaisesRegex(orders.BrokerApiError, "거래 시간이 아닙니다"):
-                notify.preview_manual_signal(self.payload)
+                notify.preview_manual_order(self.payload)
             with self.assertRaisesRegex(orders.BrokerApiError, "거래 시간이 아닙니다"):
-                notify.send_manual_signal(preview)
+                notify.submit_manual_order(preview)
             with self.assertRaisesRegex(orders.BrokerApiError, "거래 시간이 아닙니다"):
                 orders.resolve_order("a1", "test", "s1", "buy", 1, fresh=False)
         self.sender.assert_not_called()
@@ -798,13 +798,13 @@ class ManualSignalsTest(TestCase):
             rebuy_after_sell=True,
         )
         self.payload.update(side="sell")
-        _, trigger, _ = notify._manual_signal(self.payload, fresh=False)
+        _, trigger, _ = notify._manual_order(self.payload, fresh=False)
         self.assertEqual(trigger["action"], "sell")
         self.assertFalse(trigger["rebuy"])
         self.assertTrue(self.manual()["sent"])
         self.strategy["status"]["held_count"] = 2
         with self.assertRaises(orders.RoundNotOrderableError):
-            notify.preview_manual_signal(self.payload)
+            notify.preview_manual_order(self.payload)
 
     def test_different_account_or_side_can_have_separate_signal(self):
         self.manual()
@@ -831,14 +831,14 @@ class ManualSignalsTest(TestCase):
             },
             {"thread_ts": "1"},
         )
-        self.assertEqual(orders._fill_source(base), "manual_slack")
+        self.assertEqual(orders._fill_source(base), "manual_order")
         self.assertEqual(orders._fill_source({"round": 1}), "slack")
         # 회차 없는 주문은 API 주문 모달, 자동 주문 표시가 있으면 자동이다.
         self.assertEqual(orders._fill_source({"round": None}), "api")
         self.assertEqual(orders._fill_source({"round": 1, "slack": {"auto": True}}), "auto")
 
     def test_manual_message_submits_order_at_once_as_manual(self):
-        _, trigger, _ = notify._manual_signal(self.payload, fresh=False)
+        _, trigger, _ = notify._manual_order(self.payload, fresh=False)
         with (
             patch.object(slack, "find_duplicate_order", return_value=None),
             patch.object(slack, "account_env", return_value="live"),
@@ -906,7 +906,7 @@ class ManualSignalsTest(TestCase):
         self.assertTrue(threads.reserve_signal_for_order("1", "two"))
         self.assertNotIn("signal_completed", root)
 
-    def test_fill_sources_distinguish_manual_slack(self):
+    def test_fill_sources_distinguish_manual_order(self):
         rows = [
             {
                 "ticker": "ETF",
@@ -918,10 +918,10 @@ class ManualSignalsTest(TestCase):
             }
             for i in range(1, 4)
         ]
-        sources = {("20300102", "2"): ("manual_slack", "regular"), ("20300102", "3"): ("slack", "regular")}
+        sources = {("20300102", "2"): ("manual_order", "regular"), ("20300102", "3"): ("slack", "regular")}
         with patch("utils.strategy_trade_ledger.is_buy", return_value=True):
             trades = _day_trades(rows, "ETF", datetime(2030, 1, 2).date(), sources)
-        self.assertEqual([t.source for t in trades], ["manual", "manual_slack", "slack"])
+        self.assertEqual([t.source for t in trades], ["manual", "manual_order", "slack"])
 
 
 class TradeLedgerRecoveryTest(TestCase):
