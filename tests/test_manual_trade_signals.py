@@ -832,7 +832,7 @@ class ManualOrdersTest(TestCase):
             {"thread_ts": "1"},
         )
         self.assertEqual(orders._fill_source(base), "manual_order")
-        self.assertEqual(orders._fill_source({"round": 1}), "slack")
+        self.assertEqual(orders._fill_source({"round": 1}), "approved")
         # 회차 없는 주문은 API 주문 모달, 자동 주문 표시가 있으면 자동이다.
         self.assertEqual(orders._fill_source({"round": None}), "api")
         self.assertEqual(orders._fill_source({"round": 1, "slack": {"auto": True}}), "auto")
@@ -918,10 +918,10 @@ class ManualOrdersTest(TestCase):
             }
             for i in range(1, 4)
         ]
-        sources = {("20300102", "2"): ("manual_order", "regular"), ("20300102", "3"): ("slack", "regular")}
+        sources = {("20300102", "2"): ("manual_order", "regular"), ("20300102", "3"): ("approved", "regular")}
         with patch("utils.strategy_trade_ledger.is_buy", return_value=True):
             trades = _day_trades(rows, "ETF", datetime(2030, 1, 2).date(), sources)
-        self.assertEqual([t.source for t in trades], ["manual", "manual_order", "slack"])
+        self.assertEqual([t.source for t in trades], ["manual", "manual_order", "approved"])
 
 
 class TradeLedgerRecoveryTest(TestCase):

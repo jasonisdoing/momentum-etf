@@ -83,7 +83,7 @@ type Status = {
 type TradeSide = "buy" | "sell" | "arbitrary_buy" | "arbitrary_sell";
 /** 회차 표의 체결 뱃지 — 짝 번호(`pairs`)는 매수는 자기 번호, 매도는 판 매수의 번호다(최근 30일 안 매수만). */
 /** 체결 출처 — 백엔드 `strategy_trade_ledger.SOURCE_*`. */
-type FillSource = "auto" | "slack" | "manual_order" | "api" | "manual";
+type FillSource = "auto" | "approved" | "manual_order" | "api" | "manual";
 type TradeBadge = { side: TradeSide; pairs: number[]; source: FillSource; seq?: number; price?: number; shares?: number };
 
 const FILL_LABELS = {
@@ -501,10 +501,10 @@ function RoundStatus({
 // 매수는 보라, 매도는 주황 — 빨강·파랑은 상승·하락 손익색이라 헷갈리고 초록은 슬랙·주문 표시가 쓴다.
 const FILL_COLORS = { buy: "var(--tblr-purple, #ae3ec9)", sell: "var(--tblr-orange, #f76707)" } as const;
 
-// AUTO 자동 주문 · SLACK 자동 신호를 버튼으로 · MANUAL 화면에서 확인 후 바로 주문(회차 주문·API 주문 모달) · MTS 앱 기록 없는 직접 주문.
+// AUTO 자동 주문 · APPROVED 자동 신호를 사람이 승인 · MANUAL 화면에서 확인 후 바로 주문(회차 주문·API 주문 모달) · MTS 앱 기록 없는 직접 주문.
 const FILL_SOURCE_WORDS: Record<FillSource, string> = {
   auto: "AUTO",
-  slack: "SLACK",
+  approved: "APPROVED",
   manual_order: "MANUAL",
   api: "MANUAL",
   manual: "MTS",

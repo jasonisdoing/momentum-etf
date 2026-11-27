@@ -42,7 +42,14 @@ from utils.logger import get_app_logger
 from utils.market_session import is_instrument_trading_time, trading_time_closed_message
 from utils.portfolio_io import return_pct_from_avg_price
 from utils.strategy_trade_config import round_buy_quantity
-from utils.strategy_trade_ledger import REGULAR_SELL, SOURCE_API, SOURCE_AUTO, SOURCE_MANUAL_ORDER, is_buy
+from utils.strategy_trade_ledger import (
+    REGULAR_SELL,
+    SOURCE_API,
+    SOURCE_APPROVED,
+    SOURCE_AUTO,
+    SOURCE_MANUAL_ORDER,
+    is_buy,
+)
 from utils.strategy_trade_market import (
     broker_order_date,
     close_text,
@@ -560,7 +567,7 @@ def _record_base(
 
     if slack is not None and round_no is not None:
         _require_current_signal(slack["thread_ts"], account_id, pool, strategy_id, round_no)
-    origin = SOURCE_MANUAL_ORDER if slack and signal_is_manual(slack["thread_ts"]) else "slack"
+    origin = SOURCE_MANUAL_ORDER if slack and signal_is_manual(slack["thread_ts"]) else SOURCE_APPROVED
     return {
         "signal_origin": origin,
         "env": env,
@@ -1175,7 +1182,7 @@ def _fill_source(record: dict[str, Any]) -> str:
         return SOURCE_API
     if (record.get("slack") or {}).get("auto") is True:
         return SOURCE_AUTO
-    return record.get("signal_origin", "slack")
+    return record.get("signal_origin", SOURCE_APPROVED)
 
 
 def order_sources(account_id: str, today_rows: list[dict[str, Any]]) -> dict[tuple[str, str], tuple[str, str]]:
