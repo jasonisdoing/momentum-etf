@@ -1070,7 +1070,7 @@ def send_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _send_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
-    """서버 선점 뒤 Slack 메시지만 발송한다. 증권사 주문은 Slack 확인 경로만 사용한다."""
+    """서버 선점 뒤 Slack 신호를 발송하고 바로 주문한다 — 주문은 Slack 버튼 확인과 같은 경로(현재 같은 쪽 1호가 지정가)다."""
     from utils.slack_mock_orders import send_signal_order_messages
     from utils.strategy_trade_orders import find_duplicate_order, require_order_session
     from utils.strategy_trade_threads import complete_signal_thread, record_signal_thread, send_thread_message
@@ -1100,8 +1100,8 @@ def _send_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
     _save_sent_log(sent_log)
     word = "매수" if trigger["action"] == "buy" else "매도"
     text = build_message(strategy, [trigger]) + (
-        f"\n*수동 슬랙 발송* · {trigger['round']}호 {word} · "
-        f"{_level(preview['price'], strategy['country'])} · {preview['quantity']:,}주 · 직접 회수 전까지 유지됩니다."
+        f"\n*수동 주문* · {trigger['round']}호 {word} · "
+        f"{_level(preview['price'], strategy['country'])} · {preview['quantity']:,}주"
     )
     signal_ts = send_thread_message(text)
     if not signal_ts:

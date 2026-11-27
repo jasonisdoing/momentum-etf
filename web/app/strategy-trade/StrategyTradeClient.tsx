@@ -466,7 +466,7 @@ function RoundStatus({
       : []),
     ...row.slack_signals.map((signal) => {
       const label = signal.manual
-        ? "수동슬랙"
+        ? "수동주문"
         : signal.side === "sell" && row.rebuy_after_sell
           ? "매도후재매수 슬랙"
           : `${SIDE_WORDS[signal.side]}슬랙`;
@@ -1583,7 +1583,7 @@ type ManualSignalPreview = {
   round: number; side: "buy" | "sell"; price: number; quantity: number; token: string;
 };
 
-/** 서버에서 확인한 수동 신호만 발송한다. 실제 주문은 Slack 확인을 거친다. */
+/** 서버에서 확인한 수동 주문 — Slack 신호를 남기고 자동 주문과 같은 호가(같은 쪽 1호가 지정가)로 바로 주문한다. */
 function ManualSignalButton({ view, row, onSent }: { view: StrategyView; row: RoundRow; onSent: () => Promise<void> }) {
   const currency = useTradeCurrency();
   const toast = useToast();
@@ -1599,13 +1599,13 @@ function ManualSignalButton({ view, row, onSent }: { view: StrategyView; row: Ro
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error ?? "수동 슬랙 신호를 처리하지 못했습니다.");
+    if (!response.ok) throw new Error(result.error ?? "수동 주문을 처리하지 못했습니다.");
     return result;
   };
   const prepare = async () => {
     setBusy(true);
     try { setPreview(await call("/preview", request)); }
-    catch (error) { toast.error(error instanceof Error ? error.message : "신호 확인 실패"); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "주문 확인 실패"); }
     finally { setBusy(false); }
   };
   const send = async () => {
@@ -1613,11 +1613,11 @@ function ManualSignalButton({ view, row, onSent }: { view: StrategyView; row: Ro
     setBusy(true);
     try {
       const result = await call("", preview);
-      toast.success(result.duplicate ? "이미 발송된 신호가 있습니다." : "수동 Slack 신호를 발송했습니다.");
+      toast.success(result.duplicate ? "이미 발송된 신호가 있습니다." : "수동 주문을 냈습니다. 결과는 Slack 스레드로 알립니다.");
       setPreview(null);
       await onSent();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "신호 발송 실패");
+      toast.error(error instanceof Error ? error.message : "주문 실패");
       setPreview(null);
       await onSent();
     } finally { setBusy(false); }
@@ -1625,14 +1625,14 @@ function ManualSignalButton({ view, row, onSent }: { view: StrategyView; row: Ro
   return (
     <>
       <button type="button" className="btn btn-sm" disabled={active || ordered || busy}
-        title={active ? "이미 발송된 신호가 있습니다" : ordered ? "진행 중인 주문이 있습니다" : "수동 Slack 신호 발송"}
-        onClick={() => void prepare()}>{SIDE_WORDS[side]}</button>
-      <AppModal open={preview !== null} title={`${SIDE_WORDS[side]} 슬랙 발송 확인`}
+        title={active ? "이미 발송된 신호가 있습니다" : ordered ? "진행 중인 주문이 있습니다" : "현재 호가로 바로 주문"}
+        onClick={() => void prepare()}>{SIDE_WORDS[side]}주문</button>
+      <AppModal open={preview !== null} title={`${SIDE_WORDS[side]}주문 확인`}
         onClose={() => { if (!busy) setPreview(null); }}
         footer={<div style={{ display: "flex", justifyContent: "flex-end", gap: 8, width: "100%" }}>
           <button type="button" className="btn" disabled={busy} onClick={() => setPreview(null)}>취소</button>
           <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void send()}>
-            {busy ? "발송 중…" : "확인 후 발송"}
+            {busy ? "주문 중…" : "확인 후 주문"}
           </button>
         </div>}>
         {preview ? <dl style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 8 }}>
@@ -1643,8 +1643,8 @@ function ManualSignalButton({ view, row, onSent }: { view: StrategyView; row: Ro
           <dt>신호 가격</dt><dd>{formatPrice(preview.price, currency)}</dd>
           <dt>예상 수량</dt><dd>{preview.quantity.toLocaleString()}주</dd>
         </dl> : null}
-        <p>Slack 주문 메시지를 보냅니다. 실제 주문 가격·수량은 Slack 주문 확인 단계에서 확인합니다.</p>
-        <p style={{ color: "var(--text-muted)", marginBottom: 0 }}>수동 신호는 직접 회수할 때까지 유지되며, 체결 후에는 재주문할 수 없습니다.</p>
+        <p>확인하면 지금의 {preview?.side === "sell" ? "매도" : "매수"} 1호가 지정가로 바로 주문합니다(자동 주문과 같은 호가). 접수·체결 결과는 Slack 스레드로 알립니다.</p>
+        <p style={{ color: "var(--text-muted)", marginBottom: 0 }}>체결 후에는 같은 신호로 재주문할 수 없습니다.</p>
       </AppModal>
     </>
   );

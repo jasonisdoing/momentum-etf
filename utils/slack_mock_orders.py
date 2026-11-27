@@ -1139,8 +1139,9 @@ def close_session_threads(strategies: list[dict[str, Any]]) -> int:
 def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dict[str, Any]], signal_ts: str) -> int:
     """신호가 난 회차마다 주문 메시지(버튼)를 신호 메시지의 스레드로 보내고 그 스레드를 추적 대상으로 기록한다 — 보낸 건수.
 
-    이미 주문이 진행 중인 회차는 건너뛴다. 주문은 슬랙의 버튼과 모달 확인을 거쳐야 나간다 — 단 「자동」을 켠
-    전략의 자동 신호(`is_auto_trigger`)는 메시지를 보낸 뒤 버튼 확인과 같은 경로(`_submit_order`)로 바로 주문한다.
+    이미 주문이 진행 중인 회차는 건너뛴다. 자동 신호는 슬랙의 버튼과 모달 확인을 거쳐야 주문이 나간다 — 단 「자동」을
+    켠 전략의 자동 신호(`is_auto_trigger`)와 화면에서 확인하고 보낸 수동 주문은 메시지를 보낸 뒤 버튼 확인과 같은
+    경로(`_submit_order`)로 바로 주문한다.
     호출하는 쪽이 같은 계좌·종목을 `signal_lock`으로 예약해야 한다.
     """
     account_id = strategy_view["account_id"]
@@ -1152,6 +1153,8 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
         and not (trigger["rebuy"] and find_duplicate_order(account_id, trigger["strategy_id"], "buy") is not None)
     ]
     messages: list[dict[str, Any]] = []
+    # 바로 주문할 메시지 — 자동 주문과 화면에서 사람이 확인한 수동 주문.
+    submit_now: list[dict[str, Any]] = []
     try:
         for trigger in pending:
             if trigger.get("origin") == "manual":
@@ -1172,6 +1175,7 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
                     auto=False,
                 )
                 messages.append(message)
+                submit_now.append(message)
                 continue
             message = send_order_message(
                 account_id,
@@ -1185,27 +1189,30 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
                 arbitrary_id=trigger.get("arbitrary_id"),
             )
             messages.append(message)
+            if message["request"]["auto"]:
+                submit_now.append(message)
     finally:
         # 중간에 실패해도 이미 보낸 메시지는 스레드로 추적한다.
         if messages:
             register_signal_thread(get_slack_channel(), signal_ts, messages)
     channel = get_slack_channel()
-    for message in messages:
-        if message["request"]["auto"]:
-            # 사람이 버튼을 누르고 확인한 것과 같은 대상 — 주문 실패는 `_place` 가 스레드로 알리고 버튼을 되살린다.
-            try:
-                _submit_order(
-                    {
-                        "request": message["request"],
-                        "channel": channel,
-                        "message_ts": message["ts"],
-                        "thread_ts": signal_ts,
-                        "kind": "order",
-                    }
-                )
-            except Exception as exc:  # 한 건이 멈춰도 나머지 자동 주문은 진행한다.
-                logger.exception("자동 주문 처리 실패")
-                send_thread_message(f"⚠️ {AUTO_ORDER_TAG} 처리 중 오류로 멈춥니다: {exc}", thread_ts=signal_ts)
+    for message in submit_now:
+        # 사람이 버튼을 누르고 확인한 것과 같은 대상 — 주문 실패는 `_place` 가 스레드로 알리고 버튼을 되살린다.
+        try:
+            _submit_order(
+                {
+                    "request": message["request"],
+                    "channel": channel,
+                    "message_ts": message["ts"],
+                    "thread_ts": signal_ts,
+                    "kind": "order",
+                }
+            )
+        except Exception as exc:  # 한 건이 멈춰도 나머지 주문은 진행한다.
+            logger.exception("신호 주문 처리 실패")
+            send_thread_message(
+                f"⚠️ {_auto_tag(message['request'])}주문 처리 중 오류로 멈춥니다: {exc}", thread_ts=signal_ts
+            )
     return len(messages)
 
 

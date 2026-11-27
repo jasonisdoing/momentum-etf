@@ -837,7 +837,7 @@ class ManualSignalsTest(TestCase):
         self.assertEqual(orders._fill_source({"round": None}), "api")
         self.assertEqual(orders._fill_source({"round": 1, "slack": {"auto": True}}), "auto")
 
-    def test_manual_message_uses_order_buttons_without_quote_or_order(self):
+    def test_manual_message_submits_order_at_once_as_manual(self):
         _, trigger, _ = notify._manual_signal(self.payload, fresh=False)
         with (
             patch.object(slack, "find_duplicate_order", return_value=None),
@@ -846,10 +846,15 @@ class ManualSignalsTest(TestCase):
             patch.object(slack, "register_signal_thread") as register,
             patch.object(slack, "get_slack_channel", return_value="test"),
             patch.object(slack, "resolve_order", side_effect=AssertionError("발송 시 주문 호가 조회 금지")),
+            patch.object(slack, "_submit_order") as submit,
         ):
             self.assertEqual(_REAL_SEND_ORDER_MESSAGES(self.strategy, [trigger], "root"), 1)
         self.assertEqual(send.call_args.args[2], "root")
         self.assertEqual(register.call_args.args[2][0]["request"]["side"], "buy")
+        # 화면에서 확인한 수동 주문은 버튼 확인과 같은 경로로 바로 내고, 자동 주문 표시는 붙이지 않는다.
+        target = submit.call_args.args[0]
+        self.assertEqual((target["thread_ts"], target["message_ts"], target["kind"]), ("root", "reply", "order"))
+        self.assertFalse(target["request"]["auto"])
 
     def test_manual_reply_has_no_ttl_and_close_keeps_buttons(self):
         self.manual()
