@@ -1157,6 +1157,14 @@ function AccountSettingsCard({
               view.country_code === "us" ? "최근 24시간 매수 / 매도 체결 횟수" : "오늘 매수 / 매도 체결 횟수",
             ),
             tradeCountColumn("recentTradeCount", "거래(30일)", "최근 30일(달력) 매수 / 매도 체결 횟수"),
+            {
+              field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned",
+              cellStyle: ({ data }) => ({
+                fontWeight: 700,
+                color: data?.heldFull ? "var(--tblr-red, #d63939)" : "inherit",
+                backgroundColor: data?.heldFull ? "color-mix(in srgb, var(--tblr-red, #d63939) 15%, transparent)" : "transparent",
+              }),
+            } satisfies ColDef<TradeListRow>,
           ]
           : []),
         // 회차금액 옆 읽기 전용 — 지금 현재가로 그 금액이 몇 주인지.
@@ -1188,14 +1196,6 @@ function AccountSettingsCard({
           ))}
         </span>
       ),
-    } satisfies ColDef<TradeListRow>,
-    {
-      field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned",
-      cellStyle: ({ data }) => ({
-        fontWeight: 700,
-        color: data?.heldFull ? "var(--tblr-red, #d63939)" : "inherit",
-        backgroundColor: data?.heldFull ? "color-mix(in srgb, var(--tblr-red, #d63939) 15%, transparent)" : "transparent",
-      }),
     } satisfies ColDef<TradeListRow>,
     { ...quantity, headerName: "보유수량", width: 88 },
     tradeWeightColumn,
